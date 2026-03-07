@@ -8,6 +8,7 @@ from supabase import create_client, Client
 import time
 from datetime import datetime, date, timedelta
 import requests
+import json
 
 # --- CONFIGURATION ---
 APP_NAME = "KartaFlow"
@@ -18,6 +19,8 @@ ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 GOOGLE_MAPS_API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
+# Note: Add GEMINI_API_KEY to your secrets to use the AI Auto-Find!
+GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 # --- PAGE SETUP ---
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📍", initial_sidebar_state="expanded")
@@ -38,6 +41,8 @@ if 'search_active' not in st.session_state: st.session_state.search_active = Fal
 if 'route_stops' not in st.session_state: st.session_state.route_stops = []
 if 'cached_routes' not in st.session_state: st.session_state.cached_routes = []
 if 'theme_toggle' not in st.session_state: st.session_state.theme_toggle = False
+if 'cust_draft' not in st.session_state: 
+    st.session_state.cust_draft = {"name": "", "pc": "", "email": "", "phone": "", "directors": "", "reg_no": "", "offices": "", "notes": ""}
 
 # --- AUTH ---
 def check_login(username, password):
@@ -182,6 +187,34 @@ def get_google_route(start_lat, start_lon, end_lat, end_lon):
     except: pass
     return None
 
+def fetch_company_info_ai(company_name, postcode):
+    """Uses Gemini API to extract public details about a business based on name/postcode"""
+    if not GEMINI_API_KEY:
+        st.error("GEMINI_API_KEY missing from secrets. Auto-find disabled.")
+        return None
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+    prompt = f"""
+    Find public business information for a UK company named '{company_name}' near postcode '{postcode}'. 
+    Return ONLY a JSON object with these exact keys:
+    "directors" (string, comma separated names),
+    "email" (string, best guess generic contact email),
+    "phone" (string, best guess contact number),
+    "registration_number" (string, UK Companies House number),
+    "offices" (string, list of addresses or locations).
+    If you don't know a field, leave it as an empty string. DO NOT include markdown backticks around the JSON.
+    """
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"responseMimeType": "application/json"}
+    }
+    try:
+        res = requests.post(url, json=payload).json()
+        text = res['candidates'][0]['content']['parts'][0]['text']
+        return json.loads(text)
+    except Exception as e:
+        print(f"AI Fetch Error: {e}")
+        return None
+
 def optimize_route(start_coords, stops):
     route, current_loc, unvisited = [], start_coords, stops.copy()
     while unvisited:
@@ -222,7 +255,16 @@ def get_engineers(company_id):
     if not supabase: return []
     try:
         res = supabase.table("Engineers").select("*").eq("Company_ID", company_id).order('id').execute()
-        return [{'id': r['id'], 'name': r.get('Name') or r.get('name'), 'lat': r['Latitude'], 'lon': r['Longitude'], 'status': r.get('status', 'Active'), 'pin_color': r.get('pin_color') or 'blue'} for r in res.data]
+        return [{
+            'id': r['id'], 
+            'name': r.get('Name') or r.get('name'), 
+            'lat': r['Latitude'], 
+            'lon': r['Longitude'], 
+            'status': r.get('status', 'Active'), 
+            'pin_color': r.get('pin_color') or 'blue',
+            'email': r.get('email', ''),     # Added
+            'mobile': r.get('mobile', '')    # Added
+        } for r in res.data]
     except: return []
 
 def get_jobs(company_id):
@@ -389,7 +431,7 @@ with st.sidebar:
         "🏠 Dashboard", 
         "📋 Fleet List", 
         "🔧 Maintenance", 
-        "🛠️ Installs", 
+        "🛠️ Installations", 
         "👥 Customers",
         "📅 Schedule Work",
         "⬆️ Data Upload"
@@ -411,7 +453,7 @@ if page == "🏠 Dashboard":
     mc1, mc2, mc3, mc4 = st.columns(4)
     mc1.metric("Active Engineers", len([e for e in engineers if e['status'] in ["Active", "Driving", "On Site"]]))
     mc2.metric("Open Maintenance", len(jobs))
-    mc3.metric("Pending Installs", len(installs))
+    mc3.metric("Pending Installations", len(installs))
     
     today_str = str(date.today())
     todays_jobs = get_schedule(st.session_state.company_id, today_str, today_str)
@@ -609,9 +651,11 @@ elif page == "📋 Fleet List":
         df_data = []
         for e in engineers:
             df_data.append({
-                'id': e['id'],
+                'id': str(e['id']), # Ensure string to prevent UUID errors
                 'name': e['name'],
                 'status': e['status'],
+                'email': e.get('email', ''),
+                'mobile': e.get('mobile', ''),
                 'current_job': ", ".join(job_map.get(e['name'], ["Available"]))
             })
         
@@ -624,6 +668,8 @@ elif page == "📋 Fleet List":
                 "id": None,
                 "name": st.column_config.TextColumn("Name", required=True),
                 "status": st.column_config.SelectboxColumn("Status", options=status_options, required=True),
+                "email": st.column_config.TextColumn("Email Address"),
+                "mobile": st.column_config.TextColumn("Mobile Number"),
                 "current_job": st.column_config.TextColumn("Current Job (Today)", disabled=True)
             },
             use_container_width=True, num_rows="fixed", key="fleet_editor"
@@ -632,11 +678,17 @@ elif page == "📋 Fleet List":
         if st.button("Save Fleet Changes", type="primary"):
             try:
                 for index, row in edited_df.iterrows():
-                    supabase.table("Engineers").update({"Name": row['name'], "status": row['status']}).eq("id", int(row['id'])).execute()
+                    # Handle updating extra columns (Ensure they exist in your Supabase 'Engineers' table)
+                    payload = {"Name": row['name'], "status": row['status']}
+                    if 'email' in row: payload['email'] = row['email']
+                    if 'mobile' in row: payload['mobile'] = row['mobile']
+                    
+                    supabase.table("Engineers").update(payload).eq("id", str(row['id'])).execute()
                 st.success(f"Updated engineers successfully!")
                 time.sleep(1)
                 st.rerun()
-            except Exception as e: st.error(f"Update failed: {e}")
+            except Exception as e: 
+                st.error(f"Update failed. (Did you add 'email' and 'mobile' columns to the Engineers table?) Details: {e}")
     else: st.info("No engineers found.")
 
 # --- PAGE: MAINTENANCE ---
@@ -664,8 +716,8 @@ elif page == "🔧 Maintenance":
                     time.sleep(0.5); st.rerun()
     else: st.info("No active jobs found.")
 
-# --- PAGE: INSTALLS ---
-elif page == "🛠️ Installs":
+# --- PAGE: INSTALLATIONS ---
+elif page == "🛠️ Installations":
     st.title("🛠️ Installation Tracker")
     if installs:
         ih1, ih2, ih3, ih4 = st.columns([2, 2, 4, 1])
@@ -699,41 +751,80 @@ elif page == "🛠️ Installs":
 elif page == "👥 Customers":
     st.title("👥 Customer Directory")
     
-    with st.expander("➕ Add New Customer", expanded=False):
-        with st.form("new_customer_form"):
-            c1, c2 = st.columns(2)
-            c_name = c1.text_input("Customer / Company Name")
-            c_pc = c2.text_input("Postcode")
-            c3, c4 = st.columns(2)
-            c_email = c3.text_input("Email Address")
-            c_phone = c4.text_input("Phone Number")
-            c_notes = st.text_area("Customer Notes")
-            
-            if st.form_submit_button("Save Customer", type="primary"):
-                if not c_name or not c_pc:
-                    st.error("Error: Customer Name and Postcode are required.")
-                else:
-                    try:
-                        supabase.table("Customers").insert({
-                            "Company_ID": st.session_state.company_id,
-                            "Name": c_name, "Postcode": c_pc, "Email": c_email, "Phone": c_phone, "Notes": c_notes
-                        }).execute()
-                        st.success("Customer added!")
-                        time.sleep(1); st.rerun()
-                    except Exception as e:
-                        st.error("Error saving customer. Make sure 'Customers' table exists in Supabase.")
+    st.subheader("🤖 Auto-Find Company Info (AI)")
+    st.caption("Enter the business name and postcode, and AI will search public records for contact info and directors.")
+    with st.form("ai_find_form"):
+        c1, c2 = st.columns([3, 1])
+        search_name = c1.text_input("Registered Business Name")
+        search_pc = c2.text_input("Postcode")
+        
+        if st.form_submit_button("Search AI", type="primary"):
+            if not search_name:
+                st.warning("Please enter a business name to search.")
+            else:
+                with st.spinner("Searching public records..."):
+                    ai_data = fetch_company_info_ai(search_name, search_pc)
+                    if ai_data:
+                        st.session_state.cust_draft['name'] = search_name
+                        st.session_state.cust_draft['pc'] = search_pc
+                        st.session_state.cust_draft['email'] = ai_data.get('email', '')
+                        st.session_state.cust_draft['phone'] = ai_data.get('phone', '')
+                        st.session_state.cust_draft['directors'] = ai_data.get('directors', '')
+                        st.session_state.cust_draft['reg_no'] = ai_data.get('registration_number', '')
+                        st.session_state.cust_draft['offices'] = ai_data.get('offices', '')
+                        st.success("Information found! Review and save below.")
+                    else:
+                        st.warning("Could not automatically retrieve data. Please fill manually below.")
+
+    st.subheader("📝 Manual Entry & Save")
+    with st.form("new_customer_form"):
+        c1, c2 = st.columns(2)
+        c_name = c1.text_input("Customer / Company Name", value=st.session_state.cust_draft.get('name', ''))
+        c_pc = c2.text_input("Main Postcode", value=st.session_state.cust_draft.get('pc', ''))
+        
+        c3, c4 = st.columns(2)
+        c_email = c3.text_input("Email Address", value=st.session_state.cust_draft.get('email', ''))
+        c_phone = c4.text_input("Phone Number", value=st.session_state.cust_draft.get('phone', ''))
+        
+        c5, c6 = st.columns(2)
+        c_directors = c5.text_input("Main Directors", value=st.session_state.cust_draft.get('directors', ''))
+        c_reg = c6.text_input("Business Registration Number", value=st.session_state.cust_draft.get('reg_no', ''))
+        
+        c_offices = st.text_area("Multiple Offices / Addresses", value=st.session_state.cust_draft.get('offices', ''))
+        c_notes = st.text_area("Customer Notes", value=st.session_state.cust_draft.get('notes', ''))
+        
+        if st.form_submit_button("Save Customer", type="primary"):
+            if not c_name or not c_pc:
+                st.error("Error: Customer Name and Postcode are required.")
+            else:
+                try:
+                    supabase.table("Customers").insert({
+                        "Company_ID": st.session_state.company_id,
+                        "Name": c_name, "Postcode": c_pc, "Email": c_email, "Phone": c_phone,
+                        "Directors": c_directors, "Registration_Number": c_reg, "Offices": c_offices, "Notes": c_notes
+                    }).execute()
+                    st.success("Customer saved successfully!")
+                    # Clear draft after save
+                    st.session_state.cust_draft = {"name": "", "pc": "", "email": "", "phone": "", "directors": "", "reg_no": "", "offices": "", "notes": ""}
+                    time.sleep(1); st.rerun()
+                except Exception as e:
+                    st.error(f"Error saving customer. Make sure all columns exist in your Supabase 'Customers' table. Error: {e}")
     
     st.divider()
+    st.subheader("Saved Customers")
     if customers:
-        st.dataframe(pd.DataFrame(customers)[['Name', 'Postcode', 'Email', 'Phone', 'Notes']], hide_index=True, use_container_width=True)
+        df_cust = pd.DataFrame(customers)
+        # Reorder columns to show important ones first if they exist
+        cols_to_show = [c for c in ['Name', 'Postcode', 'Email', 'Phone', 'Directors', 'Registration_Number', 'Offices', 'Notes'] if c in df_cust.columns]
+        st.dataframe(df_cust[cols_to_show], hide_index=True, use_container_width=True)
     else:
         st.info("No customers found. Add your first customer above.")
 
 # --- PAGE: SCHEDULE WORK ---
 elif page == "📅 Schedule Work":
-    st.title("📅 Assign Work to Schedule")
+    st.title("📅 Schedule Management")
     eng_names = [e['name'] for e in engineers] if engineers else []
-    sel_date = st.date_input("Date", min_value=datetime.today())
+    sel_date = st.date_input("Date to Schedule", min_value=datetime.today())
     
     col_forms, col_sched = st.columns([1, 1])
     
@@ -752,13 +843,13 @@ elif page == "📅 Schedule Work":
                             st.success(f"Assigned {m_eng} to {m_ref}"); time.sleep(1); st.rerun()
                     else: st.warning("Select Engineer and Job")
                     
-        with st.expander("🛠️ Install", expanded=False):
+        with st.expander("🛠️ Installation", expanded=False):
             with st.form("schedule_install_form"):
                 i_eng = st.selectbox("Engineer", eng_names, key="i_eng")
                 inst_options = [i['ref'] for i in installs] if installs else []
                 i_ref = st.selectbox("Install Ref", inst_options, index=None, placeholder="Select Install...", key="i_ref")
                 i_notes = st.text_area("Notes", key="i_notes")
-                if st.form_submit_button("Assign Install", type="primary"):
+                if st.form_submit_button("Assign Installation", type="primary"):
                     if i_eng and i_ref:
                         if add_schedule_item(st.session_state.company_id, i_eng, i_ref, sel_date, i_notes, "Install"):
                             st.success(f"Assigned {i_eng} to {i_ref}"); time.sleep(1); st.rerun()
