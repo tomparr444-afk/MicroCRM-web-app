@@ -9,6 +9,7 @@ import time
 from datetime import datetime, date, timedelta
 import requests
 import json
+import random
 
 # --- CONFIGURATION ---
 APP_NAME = "KartaFlow"
@@ -41,6 +42,7 @@ if 'search_active' not in st.session_state: st.session_state.search_active = Fal
 if 'route_stops' not in st.session_state: st.session_state.route_stops = []
 if 'cached_routes' not in st.session_state: st.session_state.cached_routes = []
 if 'theme_toggle' not in st.session_state: st.session_state.theme_toggle = False
+if 'selected_customer' not in st.session_state: st.session_state.selected_customer = None
 if 'cust_draft' not in st.session_state: 
     st.session_state.cust_draft = {"name": "", "pc": "", "email": "", "phone": "", "directors": "", "reg_no": "", "offices": "", "notes": ""}
 
@@ -144,6 +146,11 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # --- HELPER FUNCTIONS ---
+def generate_ticket(job_type):
+    """Generates unique ticket strings. KF1 for installs, KF2 for Maintenance."""
+    prefix = "KF1" if job_type == "Install" else "KF2"
+    return f"{prefix}{random.randint(10000, 99999)}"
+
 def haversine(lon1, lat1, lon2, lat2):
     lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon, dlat = lon2 - lon1, lat2 - lat1
@@ -188,7 +195,6 @@ def get_google_route(start_lat, start_lon, end_lat, end_lon):
     return None
 
 def fetch_company_info_ai(company_name, postcode):
-    """Uses Gemini API to extract public details about a business based on name/postcode"""
     if not GEMINI_API_KEY:
         st.error("GEMINI_API_KEY missing from secrets. Auto-find disabled.")
         return None
@@ -262,8 +268,8 @@ def get_engineers(company_id):
             'lon': r['Longitude'], 
             'status': r.get('status', 'Active'), 
             'pin_color': r.get('pin_color') or 'blue',
-            'email': r.get('email', ''),     # Added
-            'mobile': r.get('mobile', '')    # Added
+            'email': r.get('email', ''),
+            'mobile': r.get('mobile', '')
         } for r in res.data]
     except: return []
 
@@ -271,14 +277,14 @@ def get_jobs(company_id):
     if not supabase: return []
     try:
         res = supabase.table("Jobs").select("*").eq("Company_ID", company_id).execute()
-        return [{'id': r['id'], 'ref': r.get('Job_Ref'), 'lat': r['Latitude'], 'lon': r['Longitude'], 'desc': r.get('Description', ''), 'director': r.get('Director_Name', ''), 'severity': r.get('severity') or 'Low'} for r in res.data if r.get('Latitude') and r.get('Longitude')]
+        return [{'id': r['id'], 'ref': r.get('Job_Ref'), 'lat': r['Latitude'], 'lon': r['Longitude'], 'desc': r.get('Description', ''), 'director': r.get('Director_Name', ''), 'severity': r.get('severity') or 'Low', 'customer': r.get('Customer_Name', '')} for r in res.data if r.get('Latitude') and r.get('Longitude')]
     except: return []
 
 def get_installs(company_id):
     if not supabase: return []
     try:
         res = supabase.table("Installs").select("*").eq("Company_ID", company_id).execute()
-        return [{'id': r['id'], 'ref': r.get('Install_Ref') or r.get('Job_Ref'), 'status': r.get('status') or 'Not passed Finance', 'postcode': r.get('Postcode'), 'lat': r['Latitude'], 'lon': r['Longitude'], 'desc': r.get('Description', ''), 'director': r.get('Director_Name', '')} for r in res.data if r.get('Latitude') and r.get('Longitude')]
+        return [{'id': r['id'], 'ref': r.get('Install_Ref') or r.get('Job_Ref'), 'status': r.get('status') or 'Not passed Finance', 'postcode': r.get('Postcode'), 'lat': r['Latitude'], 'lon': r['Longitude'], 'desc': r.get('Description', ''), 'director': r.get('Director_Name', ''), 'customer': r.get('Customer_Name', '')} for r in res.data if r.get('Latitude') and r.get('Longitude')]
     except: return []
 
 def get_customers(company_id):
@@ -341,7 +347,7 @@ def delete_record(table, record_id, record_ref=None, ref_col=None):
     except Exception as e:
         return False
 
-def add_entry(table, name_col, name_val, postcode, company_id, desc=None, director=None, severity=None, pin_color=None, install_status=None):
+def add_entry(table, name_col, name_val, postcode, company_id, desc=None, director=None, severity=None, pin_color=None, install_status=None, customer_name=None):
     geolocator = Nominatim(user_agent="kartaflow_adder_v18")
     try:
         loc = geolocator.geocode(postcode)
@@ -359,11 +365,13 @@ def add_entry(table, name_col, name_val, postcode, company_id, desc=None, direct
                 if desc: payload["Description"] = desc 
                 if director: payload["Director_Name"] = director
                 if severity: payload["severity"] = severity
+                if customer_name and customer_name != "None": payload["Customer_Name"] = customer_name
             elif table == "Installs":
                 payload["Postcode"] = postcode 
                 if install_status: payload["status"] = install_status
                 if desc: payload["Description"] = desc
                 if director: payload["Director_Name"] = director
+                if customer_name and customer_name != "None": payload["Customer_Name"] = customer_name
 
             supabase.table(table).insert(payload).execute()
             return True, f"Added {name_val}", (loc.latitude, loc.longitude)
@@ -416,6 +424,7 @@ engineers = get_engineers(st.session_state.company_id)
 jobs = get_jobs(st.session_state.company_id)
 installs = get_installs(st.session_state.company_id)
 customers = get_customers(st.session_state.company_id)
+all_schedule = get_schedule(st.session_state.company_id)
 
 # --- SIDEBAR NAVIGATION ---
 with st.sidebar:
@@ -427,6 +436,17 @@ with st.sidebar:
         st.rerun()
     st.markdown("---")
     
+    # Quick Customer Search
+    if customers:
+        search_options = [""] + [c['Name'] for c in customers]
+        quick_search = st.selectbox("🔍 Search Customer", search_options, help="Instantly open a customer profile")
+        if quick_search:
+            st.session_state.selected_customer = quick_search
+        elif 'selected_customer' in st.session_state and st.session_state.selected_customer == "":
+            st.session_state.selected_customer = None
+
+    st.markdown("---")
+    
     page = st.radio("MAIN MENU", [
         "🏠 Dashboard", 
         "📋 Fleet List", 
@@ -436,6 +456,10 @@ with st.sidebar:
         "📅 Schedule Work",
         "⬆️ Data Upload"
     ], label_visibility="collapsed")
+    
+    # Override page if a customer is selected via quick search
+    if st.session_state.selected_customer:
+        page = "👥 Customers"
     
     st.markdown("---")
     if st.session_state.is_admin:
@@ -456,7 +480,7 @@ if page == "🏠 Dashboard":
     mc3.metric("Pending Installations", len(installs))
     
     today_str = str(date.today())
-    todays_jobs = get_schedule(st.session_state.company_id, today_str, today_str)
+    todays_jobs = [s for s in all_schedule if s.get('scheduled_date') == today_str]
     mc4.metric("Jobs Today", len(todays_jobs))
     
     st.divider()
@@ -551,7 +575,7 @@ if page == "🏠 Dashboard":
             ).add_to(m)
 
         for job in jobs:
-            popup_content = f"JOB: {job.get('ref')}\nDESC: {job.get('desc', '')}\nSEVERITY: {job.get('severity')}"
+            popup_content = f"TICKET: {job.get('ref')}\nDESC: {job.get('desc', '')}\nSEVERITY: {job.get('severity')}"
             folium.Marker(
                 [job['lat'], job['lon']],
                 tooltip=f"JOB: {job.get('ref')}", popup=popup_content,
@@ -561,7 +585,7 @@ if page == "🏠 Dashboard":
         for inst in installs:
             folium.Marker(
                 [inst['lat'], inst['lon']],
-                tooltip=f"INSTALL: {inst.get('ref')}", popup=f"INSTALL: {inst.get('ref')}\nSTATUS: {inst.get('status')}",
+                tooltip=f"INSTALL: {inst.get('ref')}", popup=f"TICKET: {inst.get('ref')}\nSTATUS: {inst.get('status')}",
                 icon=folium.Icon(color='purple', icon="wrench", prefix='fa') 
             ).add_to(m)
 
@@ -603,19 +627,17 @@ if page == "🏠 Dashboard":
     with col_sched:
         c_head, c_filt = st.columns([3, 2])
         c_head.subheader("📆 Week Schedule")
-        focus_date = c_filt.date_input("Week of:", value=datetime.today(), label_visibility="collapsed")
+        focus_date = c_filt.date_input("Week of:", value=datetime.today(), label_visibility="collapsed", key="dash_date")
         
         start_of_week = focus_date - timedelta(days=focus_date.weekday())
         end_of_week = start_of_week + timedelta(days=6)
-        schedule_items = get_schedule(st.session_state.company_id, start_of_week, end_of_week)
         
         days_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         
-        # Display as a vertical list of days for the dashboard right panel
         for i in range(7):
             current_day = start_of_week + timedelta(days=i)
             day_str = current_day.strftime('%Y-%m-%d')
-            day_items = [item for item in schedule_items if item['scheduled_date'] == day_str]
+            day_items = [item for item in all_schedule if item.get('scheduled_date') == day_str]
             
             with st.expander(f"{days_names[i]} - {current_day.strftime('%d/%m')}", expanded=(current_day == date.today() or bool(day_items))):
                 if not day_items:
@@ -641,7 +663,7 @@ elif page == "📋 Fleet List":
     st.title("📋 Fleet Management")
     if engineers:
         today_str = str(date.today())
-        todays_jobs = get_schedule(st.session_state.company_id, today_str, today_str)
+        todays_jobs = [s for s in all_schedule if s.get('scheduled_date') == today_str]
         job_map = {}
         for j in todays_jobs:
             eng = j['engineer_name']
@@ -651,7 +673,7 @@ elif page == "📋 Fleet List":
         df_data = []
         for e in engineers:
             df_data.append({
-                'id': str(e['id']), # Ensure string to prevent UUID errors
+                'id': str(e['id']), 
                 'name': e['name'],
                 'status': e['status'],
                 'email': e.get('email', ''),
@@ -678,7 +700,6 @@ elif page == "📋 Fleet List":
         if st.button("Save Fleet Changes", type="primary"):
             try:
                 for index, row in edited_df.iterrows():
-                    # Handle updating extra columns (Ensure they exist in your Supabase 'Engineers' table)
                     payload = {"Name": row['name'], "status": row['status']}
                     if 'email' in row: payload['email'] = row['email']
                     if 'mobile' in row: payload['mobile'] = row['mobile']
@@ -696,8 +717,8 @@ elif page == "🔧 Maintenance":
     st.title("🔧 Maintenance Jobs")
     if jobs:
         h1, h2, h3, h4, h5 = st.columns([2, 3, 2, 2, 1])
-        h1.markdown("**Ref**")
-        h2.markdown("**Description**")
+        h1.markdown("**Ticket No.**")
+        h2.markdown("**Description / Customer**")
         h3.markdown("**Director**")
         h4.markdown("**Severity**")
         h5.markdown("**Action**")
@@ -705,12 +726,14 @@ elif page == "🔧 Maintenance":
         for j in jobs:
             c1, c2, c3, c4, c5 = st.columns([2, 3, 2, 2, 1])
             c1.write(j['ref'])
-            c2.write(j.get('desc', '-'))
+            desc_text = j.get('desc', '')
+            if j.get('customer'): desc_text += f" (Cust: {j['customer']})"
+            c2.write(desc_text if desc_text else '-')
             c3.write(j.get('director', '-'))
             sev = j.get('severity') or 'Low'
             color = "green" if "low" in sev.lower() else "orange" if "medium" in sev.lower() else "red"
             c4.markdown(f":{color}[{sev}]")
-            if c5.button("Delete", key=f"del_{j['id']}", type="primary", help="Cancels job and removes from diary"):
+            if c5.button("Delete", key=f"del_{j['id']}", type="primary"):
                 if delete_record("Jobs", j['id'], j['ref'], "job_ref"):
                     st.success("Deleted & Cancelled!")
                     time.sleep(0.5); st.rerun()
@@ -721,7 +744,7 @@ elif page == "🛠️ Installations":
     st.title("🛠️ Installation Tracker")
     if installs:
         ih1, ih2, ih3, ih4 = st.columns([2, 2, 4, 1])
-        ih1.markdown("**Reference**")
+        ih1.markdown("**Ticket No.**")
         ih2.markdown("**Details**") 
         ih3.markdown("**Status**")
         ih4.markdown("**Action**")
@@ -730,8 +753,8 @@ elif page == "🛠️ Installations":
             ic1, ic2, ic3, ic4 = st.columns([2, 2, 4, 1])
             ic1.write(inst['ref'])
             details = f"📍 {inst['postcode']}"
+            if inst.get('customer'): details += f"\n🏢 {inst['customer']}"
             if inst.get('desc'): details += f"\n📝 {inst['desc']}"
-            if inst.get('director'): details += f"\n👤 {inst['director']}"
             ic2.text(details)
             current_status = inst.get('status', 'Not passed Finance')
             options = ["Not passed Finance", "Passed Finance", "Kit Ordered", "Kit Arrived"]
@@ -749,76 +772,133 @@ elif page == "🛠️ Installations":
 
 # --- PAGE: CUSTOMERS ---
 elif page == "👥 Customers":
-    st.title("👥 Customer Directory")
     
-    st.subheader("🤖 Auto-Find Company Info (AI)")
-    st.caption("Enter the business name and postcode, and AI will search public records for contact info and directors.")
-    with st.form("ai_find_form"):
-        c1, c2 = st.columns([3, 1])
-        search_name = c1.text_input("Registered Business Name")
-        search_pc = c2.text_input("Postcode")
+    # Check if a specific customer profile is requested
+    if st.session_state.selected_customer:
+        cust_name = st.session_state.selected_customer
+        st.title(f"👤 {cust_name}")
         
-        if st.form_submit_button("Search AI", type="primary"):
-            if not search_name:
-                st.warning("Please enter a business name to search.")
-            else:
-                with st.spinner("Searching public records..."):
-                    ai_data = fetch_company_info_ai(search_name, search_pc)
-                    if ai_data:
-                        st.session_state.cust_draft['name'] = search_name
-                        st.session_state.cust_draft['pc'] = search_pc
-                        st.session_state.cust_draft['email'] = ai_data.get('email', '')
-                        st.session_state.cust_draft['phone'] = ai_data.get('phone', '')
-                        st.session_state.cust_draft['directors'] = ai_data.get('directors', '')
-                        st.session_state.cust_draft['reg_no'] = ai_data.get('registration_number', '')
-                        st.session_state.cust_draft['offices'] = ai_data.get('offices', '')
-                        st.success("Information found! Review and save below.")
-                    else:
-                        st.warning("Could not automatically retrieve data. Please fill manually below.")
+        c_left, c_right = st.columns([5, 1])
+        with c_right:
+            if st.button("⬅️ Back to List", type="primary", use_container_width=True):
+                st.session_state.selected_customer = None
+                st.rerun()
+                
+        # Find customer record
+        c_data = next((c for c in customers if c['Name'] == cust_name), None)
+        
+        if c_data:
+            with st.expander("🏢 Company Information", expanded=True):
+                col1, col2, col3 = st.columns(3)
+                col1.markdown(f"**Postcode:** {c_data.get('Postcode', '-')}")
+                col1.markdown(f"**Registration No:** {c_data.get('Registration_Number', '-')}")
+                col2.markdown(f"**Email:** {c_data.get('Email', '-')}")
+                col2.markdown(f"**Phone:** {c_data.get('Phone', '-')}")
+                col3.markdown(f"**Directors:** {c_data.get('Directors', '-')}")
+                col3.markdown(f"**Offices:** {c_data.get('Offices', '-')}")
+                if c_data.get('Notes'):
+                    st.caption("Notes:")
+                    st.info(c_data.get('Notes'))
+            
+            st.divider()
+            
+            # Historical Data
+            st.subheader("📑 Job History & Active Tickets")
+            c_jobs = [j for j in jobs if j.get('customer') == cust_name]
+            c_inst = [i for i in installs if i.get('customer') == cust_name]
+            c_tickets = [j['ref'] for j in c_jobs] + [i['ref'] for i in c_inst]
+            c_sched = [s for s in all_schedule if s.get('job_ref') in c_tickets]
+            
+            tab_maint, tab_inst, tab_diary = st.tabs(["Maintenance", "Installations", "Schedule Events"])
+            
+            with tab_maint:
+                if c_jobs:
+                    st.dataframe(pd.DataFrame(c_jobs)[['ref', 'desc', 'severity', 'lat', 'lon']], hide_index=True, use_container_width=True)
+                else: st.caption("No maintenance records.")
+                
+            with tab_inst:
+                if c_inst:
+                    st.dataframe(pd.DataFrame(c_inst)[['ref', 'status', 'desc', 'postcode']], hide_index=True, use_container_width=True)
+                else: st.caption("No installation records.")
+                
+            with tab_diary:
+                if c_sched:
+                    st.dataframe(pd.DataFrame(c_sched)[['scheduled_date', 'engineer_name', 'job_ref', 'notes']], hide_index=True, use_container_width=True)
+                else: st.caption("No scheduled events found for these tickets.")
+        else:
+            st.error("Customer details not found in database.")
 
-    st.subheader("📝 Manual Entry & Save")
-    with st.form("new_customer_form"):
-        c1, c2 = st.columns(2)
-        c_name = c1.text_input("Customer / Company Name", value=st.session_state.cust_draft.get('name', ''))
-        c_pc = c2.text_input("Main Postcode", value=st.session_state.cust_draft.get('pc', ''))
-        
-        c3, c4 = st.columns(2)
-        c_email = c3.text_input("Email Address", value=st.session_state.cust_draft.get('email', ''))
-        c_phone = c4.text_input("Phone Number", value=st.session_state.cust_draft.get('phone', ''))
-        
-        c5, c6 = st.columns(2)
-        c_directors = c5.text_input("Main Directors", value=st.session_state.cust_draft.get('directors', ''))
-        c_reg = c6.text_input("Business Registration Number", value=st.session_state.cust_draft.get('reg_no', ''))
-        
-        c_offices = st.text_area("Multiple Offices / Addresses", value=st.session_state.cust_draft.get('offices', ''))
-        c_notes = st.text_area("Customer Notes", value=st.session_state.cust_draft.get('notes', ''))
-        
-        if st.form_submit_button("Save Customer", type="primary"):
-            if not c_name or not c_pc:
-                st.error("Error: Customer Name and Postcode are required.")
-            else:
-                try:
-                    supabase.table("Customers").insert({
-                        "Company_ID": st.session_state.company_id,
-                        "Name": c_name, "Postcode": c_pc, "Email": c_email, "Phone": c_phone,
-                        "Directors": c_directors, "Registration_Number": c_reg, "Offices": c_offices, "Notes": c_notes
-                    }).execute()
-                    st.success("Customer saved successfully!")
-                    # Clear draft after save
-                    st.session_state.cust_draft = {"name": "", "pc": "", "email": "", "phone": "", "directors": "", "reg_no": "", "offices": "", "notes": ""}
-                    time.sleep(1); st.rerun()
-                except Exception as e:
-                    st.error(f"Error saving customer. Make sure all columns exist in your Supabase 'Customers' table. Error: {e}")
-    
-    st.divider()
-    st.subheader("Saved Customers")
-    if customers:
-        df_cust = pd.DataFrame(customers)
-        # Reorder columns to show important ones first if they exist
-        cols_to_show = [c for c in ['Name', 'Postcode', 'Email', 'Phone', 'Directors', 'Registration_Number', 'Offices', 'Notes'] if c in df_cust.columns]
-        st.dataframe(df_cust[cols_to_show], hide_index=True, use_container_width=True)
+    # Show Directory if no specific customer is selected
     else:
-        st.info("No customers found. Add your first customer above.")
+        st.title("👥 Customer Directory")
+        
+        # Select customer from list
+        if customers:
+            st.subheader("Select a Customer")
+            cust_opts = ["-- Select a Customer --"] + [c['Name'] for c in customers]
+            sel = st.selectbox("Open Profile", cust_opts, label_visibility="collapsed")
+            if sel and sel != "-- Select a Customer --":
+                st.session_state.selected_customer = sel
+                st.rerun()
+            st.divider()
+        
+        st.subheader("🤖 Auto-Find Company Info (AI)")
+        st.caption("Enter the business name and postcode, and AI will search public records for contact info and directors.")
+        with st.form("ai_find_form"):
+            c1, c2 = st.columns([3, 1])
+            search_name = c1.text_input("Registered Business Name")
+            search_pc = c2.text_input("Postcode")
+            
+            if st.form_submit_button("Search AI", type="primary"):
+                if not search_name:
+                    st.warning("Please enter a business name to search.")
+                else:
+                    with st.spinner("Searching public records..."):
+                        ai_data = fetch_company_info_ai(search_name, search_pc)
+                        if ai_data:
+                            st.session_state.cust_draft['name'] = search_name
+                            st.session_state.cust_draft['pc'] = search_pc
+                            st.session_state.cust_draft['email'] = ai_data.get('email', '')
+                            st.session_state.cust_draft['phone'] = ai_data.get('phone', '')
+                            st.session_state.cust_draft['directors'] = ai_data.get('directors', '')
+                            st.session_state.cust_draft['reg_no'] = ai_data.get('registration_number', '')
+                            st.session_state.cust_draft['offices'] = ai_data.get('offices', '')
+                            st.success("Information found! Review and save below.")
+                        else:
+                            st.warning("Could not automatically retrieve data. Please fill manually below.")
+
+        st.subheader("📝 Manual Entry & Save")
+        with st.form("new_customer_form"):
+            c1, c2 = st.columns(2)
+            c_name = c1.text_input("Customer / Company Name", value=st.session_state.cust_draft.get('name', ''))
+            c_pc = c2.text_input("Main Postcode", value=st.session_state.cust_draft.get('pc', ''))
+            
+            c3, c4 = st.columns(2)
+            c_email = c3.text_input("Email Address", value=st.session_state.cust_draft.get('email', ''))
+            c_phone = c4.text_input("Phone Number", value=st.session_state.cust_draft.get('phone', ''))
+            
+            c5, c6 = st.columns(2)
+            c_directors = c5.text_input("Main Directors", value=st.session_state.cust_draft.get('directors', ''))
+            c_reg = c6.text_input("Business Registration Number", value=st.session_state.cust_draft.get('reg_no', ''))
+            
+            c_offices = st.text_area("Multiple Offices / Addresses", value=st.session_state.cust_draft.get('offices', ''))
+            c_notes = st.text_area("Customer Notes", value=st.session_state.cust_draft.get('notes', ''))
+            
+            if st.form_submit_button("Save Customer", type="primary"):
+                if not c_name or not c_pc:
+                    st.error("Error: Customer Name and Postcode are required.")
+                else:
+                    try:
+                        supabase.table("Customers").insert({
+                            "Company_ID": st.session_state.company_id,
+                            "Name": c_name, "Postcode": c_pc, "Email": c_email, "Phone": c_phone,
+                            "Directors": c_directors, "Registration_Number": c_reg, "Offices": c_offices, "Notes": c_notes
+                        }).execute()
+                        st.success("Customer saved successfully!")
+                        st.session_state.cust_draft = {"name": "", "pc": "", "email": "", "phone": "", "directors": "", "reg_no": "", "offices": "", "notes": ""}
+                        time.sleep(1); st.rerun()
+                    except Exception as e:
+                        st.error(f"Error saving customer. Make sure all columns exist in your Supabase 'Customers' table. Error: {e}")
 
 # --- PAGE: SCHEDULE WORK ---
 elif page == "📅 Schedule Work":
@@ -835,25 +915,25 @@ elif page == "📅 Schedule Work":
             with st.form("schedule_maint_form"):
                 m_eng = st.selectbox("Engineer", eng_names, key="m_eng")
                 maint_options = [j['ref'] for j in jobs] if jobs else []
-                m_ref = st.selectbox("Maintenance Ref", maint_options, index=None, placeholder="Select Job...", key="m_ref")
+                m_ref = st.selectbox("Maintenance Ticket", maint_options, index=None, placeholder="Select Ticket...", key="m_ref")
                 m_notes = st.text_area("Notes", key="m_notes")
                 if st.form_submit_button("Assign Maintenance", type="primary"):
                     if m_eng and m_ref:
                         if add_schedule_item(st.session_state.company_id, m_eng, m_ref, sel_date, m_notes, "Maintenance"):
                             st.success(f"Assigned {m_eng} to {m_ref}"); time.sleep(1); st.rerun()
-                    else: st.warning("Select Engineer and Job")
+                    else: st.warning("Select Engineer and Ticket")
                     
         with st.expander("🛠️ Installation", expanded=False):
             with st.form("schedule_install_form"):
                 i_eng = st.selectbox("Engineer", eng_names, key="i_eng")
                 inst_options = [i['ref'] for i in installs] if installs else []
-                i_ref = st.selectbox("Install Ref", inst_options, index=None, placeholder="Select Install...", key="i_ref")
+                i_ref = st.selectbox("Installation Ticket", inst_options, index=None, placeholder="Select Ticket...", key="i_ref")
                 i_notes = st.text_area("Notes", key="i_notes")
                 if st.form_submit_button("Assign Installation", type="primary"):
                     if i_eng and i_ref:
                         if add_schedule_item(st.session_state.company_id, i_eng, i_ref, sel_date, i_notes, "Install"):
                             st.success(f"Assigned {i_eng} to {i_ref}"); time.sleep(1); st.rerun()
-                    else: st.warning("Select Engineer and Install")
+                    else: st.warning("Select Engineer and Ticket")
                     
         with st.expander("📝 Note / Message", expanded=False):
             with st.form("diary_note_form"):
@@ -868,18 +948,17 @@ elif page == "📅 Schedule Work":
     with col_sched:
         c_head, c_filt = st.columns([3, 2])
         c_head.subheader("📆 Week Schedule")
-        focus_date = c_filt.date_input("Week of:", value=datetime.today(), label_visibility="collapsed")
+        focus_date = c_filt.date_input("Week of:", value=datetime.today(), label_visibility="collapsed", key="sch_date")
         
         start_of_week = focus_date - timedelta(days=focus_date.weekday())
         end_of_week = start_of_week + timedelta(days=6)
-        schedule_items = get_schedule(st.session_state.company_id, start_of_week, end_of_week)
         
         days_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         
         for i in range(7):
             current_day = start_of_week + timedelta(days=i)
             day_str = current_day.strftime('%Y-%m-%d')
-            day_items = [item for item in schedule_items if item['scheduled_date'] == day_str]
+            day_items = [item for item in all_schedule if item.get('scheduled_date') == day_str]
             
             with st.expander(f"{days_names[i]} - {current_day.strftime('%d/%m')}", expanded=(current_day == date.today() or bool(day_items))):
                 if not day_items:
@@ -952,23 +1031,32 @@ elif page == "⬆️ Data Upload":
                         if ok: st.success(m); time.sleep(1); st.rerun()
                         else: st.error(m)
         with col_j:
-            st.subheader("New Job")
+            st.subheader("New Job or Install")
+            st.caption("Ticket numbers will be generated automatically (KF1 for Installs, KF2 for Maintenance)")
             with st.form("add_job_form"):
-                j_r = st.text_input("Ref")
+                j_type = st.radio("Type", ["Maintenance", "Installation"])
+                c_opts = ["None"] + [c['Name'] for c in customers] if customers else ["None"]
+                j_cust = st.selectbox("Assign Customer", c_opts)
+                
                 j_p = st.text_input("Postcode")
                 j_desc = st.text_input("Description (Optional)")
                 j_dir = st.text_input("Director Name (Optional)")
                 j_sev = st.select_slider("Severity", options=["Low", "Medium", "Critical"], value="Low")
-                if st.form_submit_button("Add Job", type="primary"):
-                    if not j_r or not j_p:
-                        st.error("Ref and Postcode are required.")
+                
+                if st.form_submit_button("Create Ticket", type="primary"):
+                    if not j_p:
+                        st.error("Postcode is required.")
                     else:
-                        ok, m, coords = add_entry("Jobs", "Job_Ref", j_r, j_p, st.session_state.company_id, desc=j_desc, director=j_dir, severity=j_sev)
+                        target_table = "Jobs" if j_type == "Maintenance" else "Installs"
+                        ref_col = "Job_Ref" if j_type == "Maintenance" else "Install_Ref"
+                        ticket_num = generate_ticket("Maintenance" if j_type == "Maintenance" else "Install")
+                        
+                        ok, m, coords = add_entry(target_table, ref_col, ticket_num, j_p, st.session_state.company_id, desc=j_desc, director=j_dir, severity=j_sev, customer_name=j_cust)
                         if ok: 
-                            st.success(m)
+                            st.success(f"Ticket Created: {ticket_num}")
                             if coords: st.info(find_nearest_engineer_text(coords[0], coords[1], engineers))
                             time.sleep(3); st.rerun()
-                        else: st.error(m)
+                        else: st.error("Failed to create ticket")
 
     with tab_bulk:
         st.subheader("Upload .xlsx File")
