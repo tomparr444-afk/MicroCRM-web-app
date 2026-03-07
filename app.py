@@ -80,26 +80,59 @@ with c2:
 # --- 🎨 DYNAMIC CSS ---
 if is_light:
     bg_color, text_color, sidebar_bg, card_bg, border_color = "#f4f6f9", "#111111", "#ffffff", "#ffffff", "#dddddd"
+    button_bg, button_text = "#e0e4e8", "#111111"
     tiles_style = "CartoDB positron"
 else:
     bg_color, text_color, sidebar_bg, card_bg, border_color = "#050505", "#ffffff", "#0b0c0e", "#1e1e1e", "#333333"
+    button_bg, button_text = "#2a2d33", "#ffffff"
     tiles_style = "CartoDB dark_matter"
 
 st.markdown(f"""
 <style>
+    /* Main Backgrounds */
     .stApp {{ background-color: {bg_color}; color: {text_color}; }}
     [data-testid="stSidebar"] {{ background-color: {sidebar_bg}; border-right: 1px solid {border_color}; }}
+    
+    /* Make Sidebar Text Bigger */
+    [data-testid="stSidebar"] .stRadio label p {{ font-size: 1.15rem !important; font-weight: 500; padding: 5px 0px; }}
+    
+    /* Text Inputs */
     .stTextInput input, .stSelectbox div[data-baseweb="select"], .stTextArea textarea {{
         background-color: {card_bg}; color: {text_color}; border: 1px solid {border_color}; border-radius: 4px;
     }}
     .stTextInput input:focus, .stTextArea textarea:focus {{ border-color: #00ADB5; }}
-    .stButton button {{ background-color: {text_color}; color: {bg_color}; font-weight: bold; border-radius: 4px; border: none; transition: all 0.2s; }}
-    .stButton button:hover {{ transform: scale(1.02); opacity: 0.9; }}
+    
+    /* Standard Buttons (Fixed for Light/Dark) */
+    .stButton button {{ 
+        background-color: {button_bg} !important; 
+        border: 1px solid {border_color} !important; 
+        border-radius: 4px; 
+        transition: all 0.2s; 
+    }}
+    .stButton button p {{ color: {button_text} !important; font-weight: bold; }}
+    
+    /* Hover state for buttons */
+    .stButton button:hover {{ border-color: #00ADB5 !important; transform: scale(1.02); }}
+    .stButton button:hover p {{ color: #00ADB5 !important; }}
+
+    /* Primary Form Submit Buttons */
+    .stButton button[kind="primary"] {{ background-color: #00ADB5 !important; border-color: #00ADB5 !important; }}
+    .stButton button[kind="primary"] p {{ color: #ffffff !important; }}
+    .stButton button[kind="primary"]:hover {{ opacity: 0.9; }}
+
+    /* Expander Cards */
     .streamlit-expanderHeader {{ background-color: {card_bg}; border-radius: 4px; color: {text_color}; }}
-    .schedule-card {{ background-color: {card_bg}; border-radius: 5px; padding: 10px; margin-bottom: 10px; border-left: 4px solid #00ADB5; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+    
+    /* Calendar Card Style */
+    .schedule-card {{ background-color: {card_bg}; border-radius: 5px; padding: 10px; margin-bottom: 10px; border-left: 4px solid #00ADB5; box-shadow: 0 2px 4px rgba(0,0,0,0.1); color: {text_color}; }}
     .schedule-card.install {{ border-left: 4px solid #9b59b6; }}
     .schedule-card.note {{ border-left: 4px solid #f1c40f; }}
-    h1, h2, h3, h4, p, div, span {{ color: {text_color} !important; }}
+    
+    /* Fonts overrides */
+    h1, h2, h3, h4, h5, h6, label {{ color: {text_color} !important; }}
+    .stMarkdown p {{ color: {text_color}; }}
+    
+    /* Hide Default Branding */
     #MainMenu {{visibility: hidden;}}
     footer {{visibility: hidden;}}
 </style>
@@ -209,7 +242,6 @@ def get_installs(company_id):
 def get_customers(company_id):
     if not supabase: return []
     try:
-        # Assuming a Customers table exists. If not, this returns empty gracefully.
         res = supabase.table("Customers").select("*").eq("Company_ID", company_id).execute()
         return res.data
     except: return []
@@ -222,6 +254,119 @@ def get_schedule(company_id, start_date=None, end_date=None):
         if end_date: query = query.lte("scheduled_date", str(end_date))
         res = query.order("scheduled_date", desc=False).execute()
         return res.data
+    except: return []
+
+def add_schedule_item(company_id, engineer, job, date_obj, notes, job_type="Maintenance"):
+    if not supabase: return False
+    try:
+        payload = {
+            "company_id": company_id,
+            "engineer_name": engineer,
+            "job_ref": job,
+            "scheduled_date": str(date_obj),
+            "notes": notes,
+        }
+        if job_type == "Install": payload["notes"] = f"[INSTALL] {notes}"
+        elif job_type == "Note": payload["notes"] = f"[NOTE] {notes}"
+        
+        supabase.table("job_schedule").insert(payload).execute()
+        return True
+    except Exception as e:
+        print(f"Schedule Error: {e}")
+        return False
+
+# --- DATABASE WRITERS ---
+def update_engineer_status_color(engineer_id, new_status, new_color):
+    try:
+        payload = {"status": new_status}
+        if new_color: payload["pin_color"] = new_color
+        supabase.table("Engineers").update(payload).eq("id", engineer_id).execute()
+        return True
+    except: return False
+
+def update_install_status(install_id, new_status):
+    try:
+        supabase.table("Installs").update({"status": new_status}).eq("id", install_id).execute()
+        return True
+    except: return False
+
+def delete_record(table, record_id, record_ref=None, ref_col=None):
+    try:
+        if record_ref and ref_col:
+            supabase.table("job_schedule").delete().eq("job_ref", record_ref).execute()
+        supabase.table(table).delete().eq("id", record_id).execute()
+        return True
+    except Exception as e:
+        return False
+
+def add_entry(table, name_col, name_val, postcode, company_id, desc=None, director=None, severity=None, pin_color=None, install_status=None):
+    geolocator = Nominatim(user_agent="kartaflow_adder_v18")
+    try:
+        loc = geolocator.geocode(postcode)
+        if loc:
+            payload = {
+                name_col: name_val,
+                "Company_ID": company_id,
+                "Latitude": loc.latitude,
+                "Longitude": loc.longitude
+            }
+            if table == "Engineers": 
+                payload["status"] = "Active"
+                if pin_color: payload["pin_color"] = pin_color
+            elif table == "Jobs":
+                if desc: payload["Description"] = desc 
+                if director: payload["Director_Name"] = director
+                if severity: payload["severity"] = severity
+            elif table == "Installs":
+                payload["Postcode"] = postcode 
+                if install_status: payload["status"] = install_status
+                if desc: payload["Description"] = desc
+                if director: payload["Director_Name"] = director
+
+            supabase.table(table).insert(payload).execute()
+            return True, f"Added {name_val}", (loc.latitude, loc.longitude)
+        return False, "Postcode not found", None
+    except Exception as e: 
+        return False, "Error", None
+
+def process_bulk_upload(df, type_flag, company_id):
+    geolocator = Nominatim(user_agent=f"kartaflow_bulk_v18")
+    progress_bar = st.progress(0)
+    success_count = 0
+    total = len(df)
+    df.columns = [c.lower() for c in df.columns]
+    for index, row in df.iterrows():
+        try:
+            if type_flag == "user":
+                name_val = row['name']
+                table_target = "Engineers"
+                col_target = "Name"
+            else:
+                name_val = row['ref']
+                table_target = "Jobs"
+                col_target = "Job_Ref"
+            pcode = row['postcode']
+            location = geolocator.geocode(pcode)
+            if location:
+                payload = {
+                    col_target: name_val,
+                    "Company_ID": company_id,
+                    "Latitude": location.latitude,
+                    "Longitude": location.longitude
+                }
+                if type_flag == "user": payload["status"] = "Active"
+                supabase.table(table_target).insert(payload).execute()
+                success_count += 1
+                time.sleep(1)
+        except: pass
+        progress_bar.progress((index + 1) / total)
+    return success_count
+
+def get_all_companies():
+    if not supabase: return []
+    try:
+        res = supabase.table("Engineers").select("Company_ID").execute()
+        return sorted(list(set([r['Company_ID'] for r in res.data if r['Company_ID']])))
     except: return []
 
 # --- LOAD DATA ---
@@ -257,31 +402,6 @@ with st.sidebar:
             comps = sorted(list(set([r['Company_ID'] for r in res.data if r['Company_ID']])))
             if comps: st.session_state.company_id = st.selectbox("TARGET ADMIN:", comps)
         except: pass
-
-    with st.expander("🚦 Single Eng. Manager"):
-        if engineers:
-            eng_map = {e['name']: e['id'] for e in engineers}
-            s_name = st.selectbox("Select Engineer", list(eng_map.keys()))
-            curr = next((e for e in engineers if e['name'] == s_name), None)
-            
-            stat = curr['status'] if curr else "Active"
-            status_options = ["Active", "Home", "Driving", "On Site", "In Office", "Sick", "Holiday"]
-            try: stat_index = status_options.index(stat)
-            except: stat_index = 0 
-            new_stat = st.radio("Status:", status_options, index=stat_index)
-            
-            color_opts = ["blue", "green", "red", "purple", "orange", "darkred", "lightred", "beige", "darkblue", "darkgreen", "cadetblue", "darkpurple", "white", "pink", "lightblue", "lightgreen", "gray", "black", "lightgray"]
-            curr_color = curr.get('pin_color')
-            if curr_color: curr_color = curr_color.split()[0].lower()
-            if not curr_color or curr_color not in color_opts: curr_color = "blue"
-            new_color = st.selectbox("Pin Color:", color_opts, index=color_opts.index(curr_color))
-            
-            if st.button("Update Engineer"):
-                try:
-                    payload = {"status": new_stat, "pin_color": new_color}
-                    supabase.table("Engineers").update(payload).eq("id", eng_map[s_name]).execute()
-                    st.rerun()
-                except: pass
 
 # --- PAGE: DASHBOARD ---
 if page == "🏠 Dashboard":
@@ -474,7 +594,6 @@ if page == "🏠 Dashboard":
                     </div>
                     """, unsafe_allow_html=True)
 
-
 # --- PAGE: FLEET LIST ---
 elif page == "📋 Fleet List":
     st.title("📋 Fleet Management")
@@ -539,7 +658,7 @@ elif page == "🔧 Maintenance":
             sev = j.get('severity') or 'Low'
             color = "green" if "low" in sev.lower() else "orange" if "medium" in sev.lower() else "red"
             c4.markdown(f":{color}[{sev}]")
-            if c5.button("Delete", key=f"del_{j['id']}", help="Cancels job and removes from diary"):
+            if c5.button("Delete", key=f"del_{j['id']}", type="primary", help="Cancels job and removes from diary"):
                 if delete_record("Jobs", j['id'], j['ref'], "job_ref"):
                     st.success("Deleted & Cancelled!")
                     time.sleep(0.5); st.rerun()
@@ -570,7 +689,7 @@ elif page == "🛠️ Installs":
                 update_install_status(inst['id'], new_status)
                 st.toast(f"Updated {inst['ref']}")
                 time.sleep(0.5); st.rerun()
-            if ic4.button("Delete", key=f"del_inst_{inst['id']}"):
+            if ic4.button("Delete", key=f"del_inst_{inst['id']}", type="primary"):
                 if delete_record("Installs", inst['id'], inst['ref'], "job_ref"):
                     st.success("Deleted & Cancelled!")
                     time.sleep(0.5); st.rerun()
@@ -583,23 +702,26 @@ elif page == "👥 Customers":
     with st.expander("➕ Add New Customer", expanded=False):
         with st.form("new_customer_form"):
             c1, c2 = st.columns(2)
-            c_name = c1.text_input("Customer / Company Name", required=True)
-            c_pc = c2.text_input("Postcode", required=True)
+            c_name = c1.text_input("Customer / Company Name")
+            c_pc = c2.text_input("Postcode")
             c3, c4 = st.columns(2)
             c_email = c3.text_input("Email Address")
             c_phone = c4.text_input("Phone Number")
             c_notes = st.text_area("Customer Notes")
             
             if st.form_submit_button("Save Customer", type="primary"):
-                try:
-                    supabase.table("Customers").insert({
-                        "Company_ID": st.session_state.company_id,
-                        "Name": c_name, "Postcode": c_pc, "Email": c_email, "Phone": c_phone, "Notes": c_notes
-                    }).execute()
-                    st.success("Customer added!")
-                    time.sleep(1); st.rerun()
-                except Exception as e:
-                    st.error("Error saving customer. Make sure 'Customers' table exists in Supabase.")
+                if not c_name or not c_pc:
+                    st.error("Error: Customer Name and Postcode are required.")
+                else:
+                    try:
+                        supabase.table("Customers").insert({
+                            "Company_ID": st.session_state.company_id,
+                            "Name": c_name, "Postcode": c_pc, "Email": c_email, "Phone": c_phone, "Notes": c_notes
+                        }).execute()
+                        st.success("Customer added!")
+                        time.sleep(1); st.rerun()
+                    except Exception as e:
+                        st.error("Error saving customer. Make sure 'Customers' table exists in Supabase.")
     
     st.divider()
     if customers:
@@ -613,46 +735,114 @@ elif page == "📅 Schedule Work":
     eng_names = [e['name'] for e in engineers] if engineers else []
     sel_date = st.date_input("Date", min_value=datetime.today())
     
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.subheader("🔧 Maintenance")
-        with st.form("schedule_maint_form"):
-            m_eng = st.selectbox("Engineer", eng_names, key="m_eng")
-            maint_options = [j['ref'] for j in jobs] if jobs else []
-            m_ref = st.selectbox("Maintenance Ref", maint_options, index=None, placeholder="Select Job...", key="m_ref")
-            m_notes = st.text_area("Notes", key="m_notes")
-            if st.form_submit_button("Assign Maintenance", type="primary"):
-                if m_eng and m_ref:
-                    if add_schedule_item(st.session_state.company_id, m_eng, m_ref, sel_date, m_notes, "Maintenance"):
-                        st.success(f"Assigned {m_eng} to {m_ref}"); time.sleep(1); st.rerun()
-                else: st.warning("Select Engineer and Job")
-    with c2:
-        st.subheader("🛠️ Install")
-        with st.form("schedule_install_form"):
-            i_eng = st.selectbox("Engineer", eng_names, key="i_eng")
-            inst_options = [i['ref'] for i in installs] if installs else []
-            i_ref = st.selectbox("Install Ref", inst_options, index=None, placeholder="Select Install...", key="i_ref")
-            i_notes = st.text_area("Notes", key="i_notes")
-            if st.form_submit_button("Assign Install", type="primary"):
-                if i_eng and i_ref:
-                    if add_schedule_item(st.session_state.company_id, i_eng, i_ref, sel_date, i_notes, "Install"):
-                        st.success(f"Assigned {i_eng} to {i_ref}"); time.sleep(1); st.rerun()
-                else: st.warning("Select Engineer and Install")
-    with c3:
-        st.subheader("📝 Note / Message")
-        with st.form("diary_note_form"):
-            n_eng = st.selectbox("For Engineer (Optional)", ["All"] + eng_names, key="n_eng")
-            n_msg = st.text_area("Message / Special Request")
-            if st.form_submit_button("Add Note", type="primary"):
-                if n_msg:
-                    target = "ALL STAFF" if n_eng == "All" else n_eng
-                    add_schedule_item(st.session_state.company_id, target, "NOTE", sel_date, n_msg, "Note")
-                    st.success("Note Added"); time.sleep(1); st.rerun()
+    col_forms, col_sched = st.columns([1, 1])
+    
+    with col_forms:
+        st.subheader("Assign Tasks")
+        
+        with st.expander("🔧 Maintenance", expanded=True):
+            with st.form("schedule_maint_form"):
+                m_eng = st.selectbox("Engineer", eng_names, key="m_eng")
+                maint_options = [j['ref'] for j in jobs] if jobs else []
+                m_ref = st.selectbox("Maintenance Ref", maint_options, index=None, placeholder="Select Job...", key="m_ref")
+                m_notes = st.text_area("Notes", key="m_notes")
+                if st.form_submit_button("Assign Maintenance", type="primary"):
+                    if m_eng and m_ref:
+                        if add_schedule_item(st.session_state.company_id, m_eng, m_ref, sel_date, m_notes, "Maintenance"):
+                            st.success(f"Assigned {m_eng} to {m_ref}"); time.sleep(1); st.rerun()
+                    else: st.warning("Select Engineer and Job")
+                    
+        with st.expander("🛠️ Install", expanded=False):
+            with st.form("schedule_install_form"):
+                i_eng = st.selectbox("Engineer", eng_names, key="i_eng")
+                inst_options = [i['ref'] for i in installs] if installs else []
+                i_ref = st.selectbox("Install Ref", inst_options, index=None, placeholder="Select Install...", key="i_ref")
+                i_notes = st.text_area("Notes", key="i_notes")
+                if st.form_submit_button("Assign Install", type="primary"):
+                    if i_eng and i_ref:
+                        if add_schedule_item(st.session_state.company_id, i_eng, i_ref, sel_date, i_notes, "Install"):
+                            st.success(f"Assigned {i_eng} to {i_ref}"); time.sleep(1); st.rerun()
+                    else: st.warning("Select Engineer and Install")
+                    
+        with st.expander("📝 Note / Message", expanded=False):
+            with st.form("diary_note_form"):
+                n_eng = st.selectbox("For Engineer (Optional)", ["All"] + eng_names, key="n_eng")
+                n_msg = st.text_area("Message / Special Request")
+                if st.form_submit_button("Add Note", type="primary"):
+                    if n_msg:
+                        target = "ALL STAFF" if n_eng == "All" else n_eng
+                        add_schedule_item(st.session_state.company_id, target, "NOTE", sel_date, n_msg, "Note")
+                        st.success("Note Added"); time.sleep(1); st.rerun()
+
+    with col_sched:
+        c_head, c_filt = st.columns([3, 2])
+        c_head.subheader("📆 Week Schedule")
+        focus_date = c_filt.date_input("Week of:", value=datetime.today(), label_visibility="collapsed")
+        
+        start_of_week = focus_date - timedelta(days=focus_date.weekday())
+        end_of_week = start_of_week + timedelta(days=6)
+        schedule_items = get_schedule(st.session_state.company_id, start_of_week, end_of_week)
+        
+        days_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        
+        for i in range(7):
+            current_day = start_of_week + timedelta(days=i)
+            day_str = current_day.strftime('%Y-%m-%d')
+            day_items = [item for item in schedule_items if item['scheduled_date'] == day_str]
+            
+            with st.expander(f"{days_names[i]} - {current_day.strftime('%d/%m')}", expanded=(current_day == date.today() or bool(day_items))):
+                if not day_items:
+                    st.caption("No jobs scheduled.")
+                for item in day_items:
+                    note_text = str(item.get('notes', ''))
+                    if "[INSTALL]" in note_text: css_class = "install"
+                    elif "[NOTE]" in note_text: css_class = "note"
+                    else: css_class = "job"
+                    
+                    content = item['job_ref']
+                    if css_class == "note": content = note_text.replace("[NOTE]", "").strip()
+                    
+                    st.markdown(f"""
+                    <div class="schedule-card {css_class}" style="padding: 5px 10px; margin-bottom: 5px;">
+                        <small style="color: gray;"><b>{item['engineer_name']}</b></small><br>
+                        <span style="font-size: 0.95em;">{content}</span>
+                    </div>
+                    """, unsafe_allow_html=True)
 
 # --- PAGE: DATA UPLOAD ---
 elif page == "⬆️ Data Upload":
     st.title("⬆️ Data Upload & Entry")
     
+    with st.expander("🚦 Single Eng. Manager", expanded=False):
+        st.caption("Quickly update a single engineer's status or color from here.")
+        if engineers:
+            eng_map = {e['name']: e['id'] for e in engineers}
+            s_name = st.selectbox("Select Engineer", list(eng_map.keys()), key="se_upload")
+            curr = next((e for e in engineers if e['name'] == s_name), None)
+            
+            stat = curr['status'] if curr else "Active"
+            status_options = ["Active", "Home", "Driving", "On Site", "In Office", "Sick", "Holiday"]
+            try: stat_index = status_options.index(stat)
+            except: stat_index = 0 
+            new_stat = st.radio("Status:", status_options, index=stat_index, key="se_stat")
+            
+            color_opts = ["blue", "green", "red", "purple", "orange", "darkred", "lightred", "beige", "darkblue", "darkgreen", "cadetblue", "darkpurple", "white", "pink", "lightblue", "lightgreen", "gray", "black", "lightgray"]
+            curr_color = curr.get('pin_color')
+            if curr_color: curr_color = curr_color.split()[0].lower()
+            if not curr_color or curr_color not in color_opts: curr_color = "blue"
+            new_color = st.selectbox("Pin Color:", color_opts, index=color_opts.index(curr_color), key="se_col")
+            
+            if st.button("Update Engineer Status", type="primary"):
+                try:
+                    payload = {"status": new_stat, "pin_color": new_color}
+                    supabase.table("Engineers").update(payload).eq("id", eng_map[s_name]).execute()
+                    st.success("Engineer Updated")
+                    time.sleep(1)
+                    st.rerun()
+                except: pass
+    
+    st.divider()
+
     tab_single, tab_bulk = st.tabs(["Add Single Record", "Bulk Excel Upload"])
     
     with tab_single:
@@ -660,28 +850,34 @@ elif page == "⬆️ Data Upload":
         with col_u:
             st.subheader("New Engineer")
             with st.form("add_user_form"):
-                u_n = st.text_input("Name", required=True)
-                u_p = st.text_input("Postcode", required=True)
+                u_n = st.text_input("Name")
+                u_p = st.text_input("Postcode")
                 u_color = st.selectbox("Pin Color", ["blue", "green", "red", "purple", "orange", "darkred", "cadetblue"])
                 if st.form_submit_button("Add User", type="primary"):
-                    ok, m, coords = add_entry("Engineers", "Name", u_n, u_p, st.session_state.company_id, pin_color=u_color)
-                    if ok: st.success(m); time.sleep(1); st.rerun()
-                    else: st.error(m)
+                    if not u_n or not u_p:
+                        st.error("Name and Postcode are required.")
+                    else:
+                        ok, m, coords = add_entry("Engineers", "Name", u_n, u_p, st.session_state.company_id, pin_color=u_color)
+                        if ok: st.success(m); time.sleep(1); st.rerun()
+                        else: st.error(m)
         with col_j:
             st.subheader("New Job")
             with st.form("add_job_form"):
-                j_r = st.text_input("Ref", required=True)
-                j_p = st.text_input("Postcode", required=True)
+                j_r = st.text_input("Ref")
+                j_p = st.text_input("Postcode")
                 j_desc = st.text_input("Description (Optional)")
                 j_dir = st.text_input("Director Name (Optional)")
                 j_sev = st.select_slider("Severity", options=["Low", "Medium", "Critical"], value="Low")
                 if st.form_submit_button("Add Job", type="primary"):
-                    ok, m, coords = add_entry("Jobs", "Job_Ref", j_r, j_p, st.session_state.company_id, desc=j_desc, director=j_dir, severity=j_sev)
-                    if ok: 
-                        st.success(m)
-                        if coords: st.info(find_nearest_engineer_text(coords[0], coords[1], engineers))
-                        time.sleep(3); st.rerun()
-                    else: st.error(m)
+                    if not j_r or not j_p:
+                        st.error("Ref and Postcode are required.")
+                    else:
+                        ok, m, coords = add_entry("Jobs", "Job_Ref", j_r, j_p, st.session_state.company_id, desc=j_desc, director=j_dir, severity=j_sev)
+                        if ok: 
+                            st.success(m)
+                            if coords: st.info(find_nearest_engineer_text(coords[0], coords[1], engineers))
+                            time.sleep(3); st.rerun()
+                        else: st.error(m)
 
     with tab_bulk:
         st.subheader("Upload .xlsx File")
