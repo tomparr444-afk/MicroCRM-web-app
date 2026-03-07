@@ -719,6 +719,33 @@ elif page == "📋 Fleet List":
 # --- PAGE: MAINTENANCE ---
 elif page == "🔧 Maintenance":
     st.title("🔧 Maintenance Jobs")
+    
+    with st.expander("➕ Add New Maintenance Ticket", expanded=False):
+        st.caption("Ticket numbers will be generated automatically (KF2...)")
+        with st.form("maint_add_form"):
+            c_opts = ["None"] + [c['Name'] for c in customers] if customers else ["None"]
+            j_cust = st.selectbox("Assign Customer", c_opts)
+            
+            c1, c2 = st.columns(2)
+            j_p = c1.text_input("Postcode")
+            j_desc = c2.text_input("Description (Optional)")
+            
+            j_dir = st.text_input("Director Name (Optional)")
+            j_sev = st.select_slider("Severity", options=["Low", "Medium", "Critical"], value="Low")
+            
+            if st.form_submit_button("Create Maintenance Ticket", type="primary"):
+                if not j_p:
+                    st.error("Postcode is required.")
+                else:
+                    ticket_num = generate_ticket("Maintenance")
+                    ok, m, coords = add_entry("Jobs", "Job_Ref", ticket_num, j_p, st.session_state.company_id, desc=j_desc, director=j_dir, severity=j_sev, customer_name=j_cust)
+                    if ok: 
+                        st.success(f"Ticket Created: {ticket_num}")
+                        if coords: st.info(find_nearest_engineer_text(coords[0], coords[1], engineers))
+                        time.sleep(3); st.rerun()
+                    else: st.error("Failed to create ticket")
+    st.divider()
+
     if jobs:
         h1, h2, h3, h4, h5 = st.columns([2, 3, 2, 2, 1])
         h1.markdown("**Ticket No.**")
@@ -746,6 +773,33 @@ elif page == "🔧 Maintenance":
 # --- PAGE: INSTALLATIONS ---
 elif page == "🛠️ Installations":
     st.title("🛠️ Installation Tracker")
+    
+    with st.expander("➕ Add New Installation Ticket", expanded=False):
+        st.caption("Ticket numbers will be generated automatically (KF1...)")
+        with st.form("inst_add_form"):
+            c_opts = ["None"] + [c['Name'] for c in customers] if customers else ["None"]
+            i_cust = st.selectbox("Assign Customer", c_opts)
+            
+            i_c1, i_c2 = st.columns(2)
+            i_pc = i_c1.text_input("Postcode")
+            i_desc = i_c2.text_input("Description (Optional)") 
+            
+            i_dir = st.text_input("Director Name (Optional)") 
+            i_stat = st.select_slider("Status", options=["Not passed Finance", "Passed Finance", "Kit Ordered", "Kit Arrived"], value="Not passed Finance")
+            
+            if st.form_submit_button("Create Installation Ticket", type="primary"):
+                if not i_pc:
+                    st.error("Postcode is required.")
+                else:
+                    ticket_num = generate_ticket("Install")
+                    ok, m, coords = add_entry("Installs", "Install_Ref", ticket_num, i_pc, st.session_state.company_id, install_status=i_stat, desc=i_desc, director=i_dir, customer_name=i_cust)
+                    if ok:
+                        st.success(f"Ticket Created: {ticket_num}")
+                        if coords: st.info(find_nearest_engineer_text(coords[0], coords[1], engineers))
+                        time.sleep(3); st.rerun()
+                    else: st.error("Failed to create ticket")
+    st.divider()
+
     if installs:
         ih1, ih2, ih3, ih4 = st.columns([2, 2, 4, 1])
         ih1.markdown("**Ticket No.**")
