@@ -12,19 +12,18 @@ import json
 import random
 
 # --- CONFIGURATION ---
-APP_NAME = "KartaFlow"
-LOGO_FILENAME = "KartaFlow Logo.png"
+APP_NAME = "Micro CRM"
+LOGO_FILENAME = "Micro CRM Logo.png"
 ADMIN_PASSWORD = st.secrets["ADMIN_PASSWORD"]
 
 # ⚠️ YOUR LIVE KEYS
 SUPABASE_URL = st.secrets["SUPABASE_URL"]
 SUPABASE_KEY = st.secrets["SUPABASE_KEY"]
 GOOGLE_MAPS_API_KEY = st.secrets["GOOGLE_MAPS_API_KEY"]
-# Note: Add GEMINI_API_KEY to your secrets to use the AI Auto-Find!
 GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 
 # --- PAGE SETUP ---
-st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="📍", initial_sidebar_state="expanded")
+st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="💼", initial_sidebar_state="expanded")
 
 # --- DB CONNECTION ---
 @st.cache_resource
@@ -41,7 +40,7 @@ if 'search_result' not in st.session_state: st.session_state.search_result = Non
 if 'search_active' not in st.session_state: st.session_state.search_active = False
 if 'route_stops' not in st.session_state: st.session_state.route_stops = []
 if 'cached_routes' not in st.session_state: st.session_state.cached_routes = []
-if 'theme_toggle' not in st.session_state: st.session_state.theme_toggle = False
+if 'theme_toggle' not in st.session_state: st.session_state.theme_toggle = True # Default to Light Mode for CRM feel
 if 'selected_customer' not in st.session_state: st.session_state.selected_customer = None
 if 'recent_customers' not in st.session_state: st.session_state.recent_customers = []
 if 'main_menu' not in st.session_state: st.session_state.main_menu = "🏠 Dashboard"
@@ -59,19 +58,17 @@ def check_login(username, password):
 
 # --- LOGIN SCREEN ---
 if not st.session_state.logged_in:
-    # Inject basic dark theme for login
-    st.markdown("<style>.stApp { background-color: #050505; color: #ffffff; }</style>", unsafe_allow_html=True)
+    st.markdown("<style>.stApp { background-color: #0f172a; color: #ffffff; }</style>", unsafe_allow_html=True)
     login_holder = st.empty() 
     with login_holder.container():
-        # Optimized for mobile viewing (wider middle column)
         col1, col2, col3 = st.columns([1, 8, 1])
         with col2:
-            st.markdown(f"<h1 style='text-align: center; color: white;'>🔐 {APP_NAME} Login</h1>", unsafe_allow_html=True)
+            st.markdown(f"<h1 style='text-align: center; color: white; margin-top: 100px;'>💼 {APP_NAME} Access</h1>", unsafe_allow_html=True)
             with st.form("login"):
                 user = st.text_input("Username", key="login_username_input")
                 pw = st.text_input("Password", type="password", key="login_password_input")
                 
-                if st.form_submit_button("Connect"): 
+                if st.form_submit_button("Secure Login"): 
                     res = check_login(user, pw)
                     if res:
                         st.session_state.logged_in = True
@@ -82,62 +79,87 @@ if not st.session_state.logged_in:
                     else: st.error("Access Denied")
     st.stop()
 
-# Read theme from session state so CSS updates before the sidebar renders
+# --- THEME CONFIGURATION ---
 is_light = st.session_state.theme_toggle
 
-# --- 🎨 DYNAMIC CSS ---
 if is_light:
-    bg_color, text_color, sidebar_bg, card_bg, border_color = "#f4f6f9", "#111111", "#ffffff", "#ffffff", "#dddddd"
-    button_bg, button_text = "#e0e4e8", "#111111"
+    # Modern Light Mode (Salesforce/Hubspot style)
+    bg_color, text_color, sidebar_bg, card_bg, border_color = "#f9fafb", "#111827", "#ffffff", "#ffffff", "#e5e7eb"
+    button_bg, button_text, primary_btn = "#f3f4f6", "#111827", "#2563eb"
     tiles_style = "CartoDB positron"
 else:
-    bg_color, text_color, sidebar_bg, card_bg, border_color = "#050505", "#ffffff", "#0b0c0e", "#1e1e1e", "#333333"
-    button_bg, button_text = "#2a2d33", "#ffffff"
+    # Modern Slate Dark Mode
+    bg_color, text_color, sidebar_bg, card_bg, border_color = "#0f172a", "#f8fafc", "#1e293b", "#1e293b", "#334155"
+    button_bg, button_text, primary_btn = "#334155", "#f8fafc", "#3b82f6"
     tiles_style = "CartoDB dark_matter"
 
+# --- 🎨 ENTERPRISE UI CSS OVERHAUL ---
 st.markdown(f"""
 <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    
+    * {{ font-family: 'Inter', sans-serif !important; }}
+
     /* Main Backgrounds */
     .stApp {{ background-color: {bg_color}; color: {text_color}; }}
     [data-testid="stSidebar"] {{ background-color: {sidebar_bg}; border-right: 1px solid {border_color}; }}
     
-    /* Make Sidebar Text Bigger */
-    [data-testid="stSidebar"] .stRadio label p {{ font-size: 1.15rem !important; font-weight: 500; padding: 5px 0px; }}
+    /* Make Sidebar Text Professional */
+    [data-testid="stSidebar"] .stRadio label p {{ font-size: 1.05rem !important; font-weight: 500; padding: 6px 0px; color: {text_color}; }}
     
-    /* Text Inputs */
-    .stTextInput input, .stSelectbox div[data-baseweb="select"], .stTextArea textarea, .stNumberInput input {{
-        background-color: {card_bg}; color: {text_color}; border: 1px solid {border_color}; border-radius: 4px;
+    /* Metrics Cards */
+    [data-testid="stMetric"] {{
+        background-color: {card_bg};
+        border: 1px solid {border_color};
+        padding: 15px 20px;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }}
-    .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {{ border-color: #00ADB5; }}
     
-    /* Standard Buttons (Fixed for Light/Dark) */
+    /* Inputs */
+    .stTextInput input, .stSelectbox div[data-baseweb="select"], .stTextArea textarea, .stNumberInput input {{
+        background-color: {card_bg}; color: {text_color}; border: 1px solid {border_color}; border-radius: 6px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+    }}
+    .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {{ 
+        border-color: {primary_btn}; 
+        box-shadow: 0 0 0 1px {primary_btn};
+    }}
+    
+    /* Standard Buttons */
     .stButton button {{ 
         background-color: {button_bg} !important; 
         border: 1px solid {border_color} !important; 
-        border-radius: 4px; 
-        transition: all 0.2s; 
+        border-radius: 6px; 
+        font-weight: 500;
+        transition: all 0.2s ease; 
     }}
-    .stButton button p {{ color: {button_text} !important; font-weight: bold; }}
-    
-    /* Hover state for buttons */
-    .stButton button:hover {{ border-color: #00ADB5 !important; transform: scale(1.02); }}
-    .stButton button:hover p {{ color: #00ADB5 !important; }}
+    .stButton button p {{ color: {button_text} !important; font-weight: 500; }}
+    .stButton button:hover {{ border-color: {primary_btn} !important; transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
+    .stButton button:hover p {{ color: {primary_btn} !important; }}
 
     /* Primary Form Submit Buttons */
-    .stButton button[kind="primary"] {{ background-color: #00ADB5 !important; border-color: #00ADB5 !important; }}
-    .stButton button[kind="primary"] p {{ color: #ffffff !important; }}
-    .stButton button[kind="primary"]:hover {{ opacity: 0.9; }}
+    .stButton button[kind="primary"] {{ background-color: {primary_btn} !important; border-color: {primary_btn} !important; }}
+    .stButton button[kind="primary"] p {{ color: #ffffff !important; font-weight: 600; }}
+    .stButton button[kind="primary"]:hover {{ opacity: 0.9; transform: translateY(-1px); }}
+    .stButton button[kind="primary"]:hover p {{ color: #ffffff !important; }}
 
     /* Expander Cards */
-    .streamlit-expanderHeader {{ background-color: {card_bg}; border-radius: 4px; color: {text_color}; }}
-    
+    .streamlit-expanderHeader {{ background-color: {card_bg}; border-radius: 6px; color: {text_color}; border: 1px solid {border_color}; font-weight: 600; }}
+    [data-testid="stExpander"] {{ border: none !important; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-radius: 6px; background-color: {card_bg}; }}
+
     /* Calendar Card Style */
-    .schedule-card {{ background-color: {card_bg}; border-radius: 5px; padding: 10px; margin-bottom: 10px; border-left: 4px solid #00ADB5; box-shadow: 0 2px 4px rgba(0,0,0,0.1); color: {text_color}; }}
-    .schedule-card.install {{ border-left: 4px solid #9b59b6; }}
-    .schedule-card.note {{ border-left: 4px solid #f1c40f; }}
+    .schedule-card {{ 
+        background-color: {bg_color}; border: 1px solid {border_color}; 
+        border-radius: 6px; padding: 12px; margin-bottom: 12px; 
+        border-left: 4px solid {primary_btn}; 
+        color: {text_color}; 
+    }}
+    .schedule-card.install {{ border-left: 4px solid #8b5cf6; }}
+    .schedule-card.note {{ border-left: 4px solid #f59e0b; }}
     
     /* Fonts overrides */
-    h1, h2, h3, h4, h5, h6, label {{ color: {text_color} !important; }}
+    h1, h2, h3, h4, h5, h6, label {{ color: {text_color} !important; font-weight: 600 !important; }}
     .stMarkdown p {{ color: {text_color}; }}
     
     /* Hide Default Branding */
@@ -146,35 +168,18 @@ st.markdown(f"""
 
     /* 📱 MOBILE RESPONSIVE FIXES */
     @media (max-width: 768px) {{
-        /* Reduce overall padding on mobile */
-        .block-container {{
-            padding-top: 2rem !important;
-            padding-left: 1rem !important;
-            padding-right: 1rem !important;
-        }}
-        
-        /* Stack metrics properly */
-        div[data-testid="metric-container"] {{
-            margin-bottom: 10px;
-        }}
-
-        /* Make dataframes scroll horizontally */
-        div[data-testid="stDataFrame"] {{
-            overflow-x: auto;
-        }}
-
-        /* Make buttons easier to tap */
-        .stButton button {{
-            min-height: 44px; 
-        }}
+        .block-container {{ padding-top: 2rem !important; padding-left: 1rem !important; padding-right: 1rem !important; }}
+        div[data-testid="metric-container"] {{ margin-bottom: 10px; }}
+        div[data-testid="stDataFrame"] {{ overflow-x: auto; }}
+        .stButton button {{ min-height: 44px; }}
     }}
 </style>
 """, unsafe_allow_html=True)
 
 # --- HELPER FUNCTIONS ---
 def generate_ticket(job_type):
-    """Generates unique ticket strings. KF1 for installs, KF2 for Maintenance."""
-    prefix = "KF1" if job_type == "Install" else "KF2"
+    """Generates unique ticket strings. MC1 for installs, MC2 for Maintenance."""
+    prefix = "MC1" if job_type == "Install" else "MC2"
     return f"{prefix}{random.randint(10000, 99999)}"
 
 def haversine(lon1, lat1, lon2, lat2):
@@ -378,7 +383,7 @@ def delete_record(table, record_id, record_ref=None, ref_col=None):
         return False
 
 def add_entry(table, name_col, name_val, postcode, company_id, desc=None, director=None, severity=None, pin_color=None, install_status=None, customer_name=None):
-    geolocator = Nominatim(user_agent="kartaflow_adder_v18")
+    geolocator = Nominatim(user_agent="microcrm_adder_v1")
     try:
         loc = geolocator.geocode(postcode)
         if loc:
@@ -411,7 +416,7 @@ def add_entry(table, name_col, name_val, postcode, company_id, desc=None, direct
         return False, "Error", None
 
 def process_bulk_upload(df, type_flag, company_id):
-    geolocator = Nominatim(user_agent=f"kartaflow_bulk_v18")
+    geolocator = Nominatim(user_agent=f"microcrm_bulk_v1")
     progress_bar = st.progress(0)
     success_count = 0
     total = len(df)
@@ -457,16 +462,18 @@ installs = get_installs(st.session_state.company_id)
 customers = get_customers(st.session_state.company_id)
 all_schedule = get_schedule(st.session_state.company_id)
 
+# --- THEME TOGGLE (Top Right) ---
+c1, c2 = st.columns([9, 1])
+with c2:
+    st.toggle("☀️ Theme", key="theme_toggle", label_visibility="collapsed")
+
 # --- SIDEBAR NAVIGATION ---
 with st.sidebar:
-    try: st.image(LOGO_FILENAME, width=200)
+    try: st.image(LOGO_FILENAME, width=220)
     except: st.header(APP_NAME)
-    st.caption(f"CONNECTED: {st.session_state.company_id.upper()}")
+    st.caption(f"CONNECTED: {st.session_state.company_id.upper() if st.session_state.company_id else 'NONE'}")
     
-    # Theme toggle tucked into the sidebar
-    st.toggle("☀️ Light Mode", key="theme_toggle")
-    
-    if st.button("LOGOUT", use_container_width=True): 
+    if st.button("Logout", use_container_width=True): 
         st.session_state.logged_in = False
         st.rerun()
     st.markdown("---")
@@ -507,18 +514,18 @@ with st.sidebar:
         try:
             res = supabase.table("Engineers").select("Company_ID").execute()
             comps = sorted(list(set([r['Company_ID'] for r in res.data if r['Company_ID']])))
-            if comps: st.session_state.company_id = st.selectbox("TARGET ADMIN:", comps)
+            if comps: st.session_state.company_id = st.selectbox("Admin Target:", comps)
         except: pass
 
 # --- PAGE: DASHBOARD ---
 if page == "🏠 Dashboard":
-    st.title("Operations Dashboard")
+    st.title("Overview")
     
     # Top Metrics
     mc1, mc2, mc3, mc4, mc5 = st.columns(5)
     mc1.metric("Active Engineers", len([e for e in engineers if e['status'] in ["Active", "Driving", "On Site"]]))
     mc2.metric("Open Maintenance", len([j for j in jobs if j.get('status') != 'Completed']))
-    mc3.metric("Pending Installations", len([i for i in installs if i.get('status') != 'Completed']))
+    mc3.metric("Pending Installs", len([i for i in installs if i.get('status') != 'Completed']))
     
     today_str = str(date.today())
     todays_jobs = [s for s in all_schedule if s.get('scheduled_date') == today_str]
@@ -530,17 +537,17 @@ if page == "🏠 Dashboard":
     col_map, col_sched = st.columns([5, 3])
     
     with col_map:
-        st.subheader("🌍 Dispatch Map")
+        st.subheader("Dispatch Map")
         
         # 1. Search Single
-        with st.expander("🔍 Single Visit", expanded=False):
+        with st.expander("🔍 Single Visit Routing", expanded=False):
             with st.form("search"):
                 c1, c2 = st.columns([3,1], vertical_alignment="bottom")
-                with c1: p_code = st.text_input("Postcode")
+                with c1: p_code = st.text_input("Target Postcode")
                 with c2: search = st.form_submit_button("Scan", type="primary")
             
             if search and p_code:
-                geo = Nominatim(user_agent="kartaflow_search_v18", timeout=10)
+                geo = Nominatim(user_agent="microcrm_search_v1", timeout=10)
                 try:
                     l = geo.geocode(p_code)
                     if l:
@@ -560,18 +567,18 @@ if page == "🏠 Dashboard":
                             route_data = get_google_route(eng['lat'], eng['lon'], l.latitude, l.longitude)
                             if route_data:
                                 pts, d_text, dur_text = route_data
-                                st.session_state.cached_routes.append({'name': eng['name'], 'points': pts, 'dist_text': d_text, 'dur_text': dur_text, 'color': "blue"})
+                                st.session_state.cached_routes.append({'name': eng['name'], 'points': pts, 'dist_text': d_text, 'dur_text': dur_text, 'color': primary_btn})
                             else:
                                 st.session_state.cached_routes.append({'name': eng['name'], 'points': None, 'dist_text': f"{eng['temp_dist']:.1f} miles (Direct)", 'dur_text': "N/A", 'color': "orange"})
-                    else: st.error("Not Found")
+                    else: st.error("Location not found")
                 except: st.error("Search Failed")
 
         # 2. Route Planner
-        with st.expander("🚚 Multiple Visits", expanded=False):
+        with st.expander("🚚 Multiple Visit Routing", expanded=False):
             c1, c2 = st.columns([3, 1])
             new_stop = c1.text_input("Add Stop (Postcode)", key="route_input")
             if c2.button("Add Stop") and new_stop:
-                geo_r = Nominatim(user_agent="kartaflow_route_v1")
+                geo_r = Nominatim(user_agent="microcrm_route_v1")
                 l_r = geo_r.geocode(new_stop)
                 if l_r:
                     st.session_state.route_stops.append({'addr': new_stop, 'lat': l_r.latitude, 'lon': l_r.longitude})
@@ -579,16 +586,16 @@ if page == "🏠 Dashboard":
                 else: st.error("Invalid Postcode")
             
             if st.session_state.route_stops:
-                st.write(f"Stops added: {len(st.session_state.route_stops)}")
+                st.write(f"Stops configured: {len(st.session_state.route_stops)}")
                 st.dataframe(pd.DataFrame(st.session_state.route_stops)[['addr']], hide_index=True, use_container_width=True)
                 start_opts = ["Custom..."] + [e['name'] for e in engineers]
-                start_sel = st.selectbox("Start From:", start_opts)
+                start_sel = st.selectbox("Start Point:", start_opts)
                 
                 start_coords = None
                 if start_sel == "Custom...":
                     start_txt = st.text_input("Custom Start Postcode")
                     if start_txt:
-                        geo_s = Nominatim(user_agent="kartaflow_start")
+                        geo_s = Nominatim(user_agent="microcrm_start")
                         ls = geo_s.geocode(start_txt)
                         if ls: start_coords = (ls.latitude, ls.longitude)
                 else:
@@ -596,7 +603,7 @@ if page == "🏠 Dashboard":
                     if eng: start_coords = (eng['lat'], eng['lon'])
 
                 col_btn1, col_btn2 = st.columns(2)
-                if col_btn1.button("Optimize Route", use_container_width=True) and start_coords:
+                if col_btn1.button("Optimize Route", type="primary", use_container_width=True) and start_coords:
                     optimized = optimize_route(start_coords, st.session_state.route_stops)
                     st.session_state.optimized_route = {'start': start_coords, 'path': optimized}
                 
@@ -643,11 +650,11 @@ if page == "🏠 Dashboard":
                 path_points = get_google_route(current_pos[0], current_pos[1], stop_pos[0], stop_pos[1])
                 
                 if path_points and path_points[0]:
-                    folium.PolyLine(path_points[0], color="#4dabf7", weight=5, opacity=0.8, tooltip=f"Leg {idx+1}: {path_points[1]} ({path_points[2]})").add_to(m)
+                    folium.PolyLine(path_points[0], color=primary_btn, weight=5, opacity=0.8, tooltip=f"Leg {idx+1}: {path_points[1]} ({path_points[2]})").add_to(m)
                 else:
                     folium.PolyLine([current_pos, stop_pos], color="cyan", weight=3, opacity=0.6, dash_array='5, 10', tooltip=f"Leg {idx+1} (Direct)").add_to(m)
                 
-                folium.Marker(stop_pos, icon=folium.DivIcon(html=f"<div style='font-size: 16pt; color: #4dabf7; font-weight: 900; text-shadow: 2px 2px #000;'>{str(idx + 1)}</div>")).add_to(m)
+                folium.Marker(stop_pos, icon=folium.DivIcon(html=f"<div style='font-size: 16pt; color: {primary_btn}; font-weight: 900; text-shadow: 2px 2px #fff;'>{str(idx + 1)}</div>")).add_to(m)
                 current_pos = stop_pos
 
         if st.session_state.search_active and st.session_state.search_result:
@@ -656,7 +663,7 @@ if page == "🏠 Dashboard":
             
             if st.session_state.cached_routes:
                 with st.container():
-                    st.markdown("##### 👷 Nearest Active Engineers")
+                    st.markdown("##### Nearest Active Engineers")
                     cc1, cc2, cc3 = st.columns(3)
                     for i, r_data in enumerate(st.session_state.cached_routes):
                         col = [cc1, cc2, cc3][i] if i < 3 else None
@@ -666,16 +673,14 @@ if page == "🏠 Dashboard":
                             folium.PolyLine(r_data['points'], color=r_data['color'], weight=4, opacity=0.7, tooltip=f"To {r_data['name']}: {r_data['dist_text']} ({r_data['dur_text']})").add_to(m)
             m.fit_bounds([[t['lat'], t['lon']]])
 
-        # Made map height smaller and container fluid for mobile
-        st_folium(m, use_container_width=True, height=450, key="map_dashboard", returned_objects=[])
+        st_folium(m, use_container_width=True, height=500, key="map_dashboard", returned_objects=[])
 
     with col_sched:
         c_head, c_filt = st.columns([3, 2])
-        c_head.subheader("📆 Week Schedule")
+        c_head.subheader("Week Schedule")
         focus_date = c_filt.date_input("Week of:", value=datetime.today(), label_visibility="collapsed", key="dash_date")
         
         start_of_week = focus_date - timedelta(days=focus_date.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
         
         days_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         
@@ -686,7 +691,7 @@ if page == "🏠 Dashboard":
             
             with st.expander(f"{days_names[i]} - {current_day.strftime('%d/%m')}", expanded=(current_day == date.today() or bool(day_items))):
                 if not day_items:
-                    st.caption("No jobs scheduled.")
+                    st.caption("No appointments.")
                 for item in day_items:
                     note_text = str(item.get('notes', ''))
                     if "[INSTALL]" in note_text: css_class = "install"
@@ -697,15 +702,15 @@ if page == "🏠 Dashboard":
                     if css_class == "note": content = note_text.replace("[NOTE]", "").strip()
                     
                     st.markdown(f"""
-                    <div class="schedule-card {css_class}" style="padding: 5px 10px; margin-bottom: 5px;">
-                        <small style="color: gray;"><b>{item['engineer_name']}</b></small><br>
+                    <div class="schedule-card {css_class}">
+                        <small style="color: {text_color}; opacity: 0.8;"><b>{item['engineer_name']}</b></small><br>
                         <span style="font-size: 0.95em;">{content}</span>
                     </div>
                     """, unsafe_allow_html=True)
 
 # --- PAGE: FLEET LIST ---
 elif page == "📋 Fleet List":
-    st.title("📋 Fleet Management")
+    st.title("Fleet Management")
     if engineers:
         today_str = str(date.today())
         todays_jobs = [s for s in all_schedule if s.get('scheduled_date') == today_str]
@@ -737,12 +742,12 @@ elif page == "📋 Fleet List":
                 "status": st.column_config.SelectboxColumn("Status", options=status_options, required=True),
                 "email": st.column_config.TextColumn("Email Address"),
                 "mobile": st.column_config.TextColumn("Mobile Number"),
-                "current_job": st.column_config.TextColumn("Current Job (Today)", disabled=True)
+                "current_job": st.column_config.TextColumn("Current Assignment", disabled=True)
             },
             use_container_width=True, num_rows="fixed", key="fleet_editor"
         )
         
-        if st.button("Save Fleet Changes", type="primary"):
+        if st.button("Save Roster Changes", type="primary"):
             try:
                 for index, row in edited_df.iterrows():
                     payload = {"Name": row['name'], "status": row['status']}
@@ -750,26 +755,22 @@ elif page == "📋 Fleet List":
                     if 'mobile' in row: payload['mobile'] = row['mobile']
                     
                     supabase.table("Engineers").update(payload).eq("id", str(row['id'])).execute()
-                st.success(f"Updated engineers successfully!")
+                st.success(f"Roster updated successfully.")
                 time.sleep(1)
                 st.rerun()
             except Exception as e: 
-                st.error(f"Update failed. (Did you add 'email' and 'mobile' columns to the Engineers table?) Details: {e}")
-    else: st.info("No engineers found.")
+                st.error(f"Update failed: {e}")
+    else: st.info("No engineers found in roster.")
 
 # --- PAGE: MAINTENANCE ---
 elif page == "🔧 Maintenance":
-    st.title("🔧 Maintenance Jobs")
+    st.title("Maintenance Tickets")
 
-    with st.expander("➕ Add New Maintenance Ticket", expanded=False):
-        st.caption("Ticket numbers will be generated automatically (KF2...)")
-        
+    with st.expander("➕ Create Maintenance Ticket", expanded=False):
         c_opts = ["None"] + [c['Name'] for c in customers] if customers else ["None"]
         j_cust = st.selectbox("Assign Customer", c_opts, key="maint_add_cust")
         
-        # Auto-fill values
-        default_pc = ""
-        default_dir = ""
+        default_pc, default_dir = "", ""
         if j_cust != "None":
             cust_data = next((c for c in customers if c['Name'] == j_cust), None)
             if cust_data:
@@ -778,14 +779,14 @@ elif page == "🔧 Maintenance":
 
         c1, c2 = st.columns(2)
         j_p = c1.text_input("Postcode", value=default_pc, key="maint_add_pc")
-        j_desc = c2.text_input("Description (Optional)", key="maint_add_desc")
+        j_desc = c2.text_input("Description / Notes", key="maint_add_desc")
         
-        j_dir = st.text_input("Director Name (Optional)", value=default_dir, key="maint_add_dir")
-        j_sev = st.select_slider("Severity", options=["Low", "Medium", "Critical"], value="Low", key="maint_add_sev")
+        j_dir = st.text_input("Contact Person", value=default_dir, key="maint_add_dir")
+        j_sev = st.select_slider("Priority Level", options=["Low", "Medium", "Critical"], value="Low", key="maint_add_sev")
         
-        if st.button("Create Maintenance Ticket", type="primary"):
+        if st.button("Generate Ticket", type="primary"):
             if not j_p:
-                st.error("Postcode is required.")
+                st.error("Postcode is required for routing.")
             else:
                 ticket_num = generate_ticket("Maintenance")
                 ok, m, coords = add_entry("Jobs", "Job_Ref", ticket_num, j_p, st.session_state.company_id, desc=j_desc, director=j_dir, severity=j_sev, customer_name=j_cust)
@@ -793,66 +794,60 @@ elif page == "🔧 Maintenance":
                     st.success(f"Ticket Created: {ticket_num}")
                     if coords: st.info(find_nearest_engineer_text(coords[0], coords[1], engineers))
                     time.sleep(3); st.rerun()
-                else: st.error("Failed to create ticket")
+                else: st.error("Failed to generate ticket.")
 
     active_jobs = [j for j in jobs if j.get('status') != 'Completed']
     comp_jobs = [j for j in jobs if j.get('status') == 'Completed']
 
-    st.subheader("Active Tickets")
+    st.subheader("Active Workflow")
     if active_jobs:
         h1, h2, h3, h4, h5 = st.columns([2, 3, 2, 2, 2])
-        h1.markdown("**Ticket No.**")
-        h2.markdown("**Description / Customer**")
-        h3.markdown("**Director**")
-        h4.markdown("**Severity**")
-        h5.markdown("**Action**")
+        h1.markdown("**Ticket ID**")
+        h2.markdown("**Details**")
+        h3.markdown("**Contact**")
+        h4.markdown("**Priority**")
+        h5.markdown("**Manage**")
         st.divider()
         for j in active_jobs:
             c1, c2, c3, c4, c5 = st.columns([2, 3, 2, 2, 2])
-            c1.write(j['ref'])
+            c1.write(f"`{j['ref']}`")
             desc_text = j.get('desc', '')
-            if j.get('customer'): desc_text += f" (Cust: {j['customer']})"
-            c2.write(desc_text if desc_text else '-')
+            if j.get('customer'): desc_text += f" *(Client: {j['customer']})*"
+            c2.markdown(desc_text if desc_text else '-')
             c3.write(j.get('director', '-'))
             sev = j.get('severity') or 'Low'
             color = "green" if "low" in sev.lower() else "orange" if "medium" in sev.lower() else "red"
-            c4.markdown(f":{color}[{sev}]")
+            c4.markdown(f":{color}[**{sev.upper()}**]")
             
             with c5:
                 btn_col1, btn_col2 = st.columns(2)
-                if btn_col1.button("✅", key=f"comp_m_{j['id']}", help="Mark Complete"):
+                if btn_col1.button("✅", key=f"comp_m_{j['id']}", help="Mark as Completed"):
                     supabase.table("Jobs").update({"status": "Completed"}).eq("id", j['id']).execute()
                     st.rerun()
-                if btn_col2.button("🗑️", key=f"del_m_{j['id']}", help="Delete Ticket"):
-                    if delete_record("Jobs", j['id'], j['ref'], "job_ref"):
-                        st.rerun()
-    else: st.info("No active maintenance tickets.")
+                if btn_col2.button("🗑️", key=f"del_m_{j['id']}", help="Delete Ticket entirely"):
+                    if delete_record("Jobs", j['id'], j['ref'], "job_ref"): st.rerun()
+    else: st.info("No active maintenance tickets in queue.")
 
     st.divider()
-    with st.expander("✅ Completed Records", expanded=False):
+    with st.expander("📦 Archived / Completed", expanded=False):
         if comp_jobs:
             for j in comp_jobs:
                 c1, c2, c3 = st.columns([2, 5, 1])
-                c1.write(f"**{j['ref']}**")
-                c2.write(f"{j.get('customer', 'Unknown')} - Completed")
-                if c3.button("Delete", key=f"del_comp_m_{j['id']}"):
-                    if delete_record("Jobs", j['id'], j['ref'], "job_ref"):
-                        st.rerun()
-        else:
-            st.caption("No completed records.")
+                c1.write(f"`{j['ref']}`")
+                c2.write(f"*{j.get('customer', 'Unknown')}* - **Completed**")
+                if c3.button("Purge", key=f"del_comp_m_{j['id']}"):
+                    if delete_record("Jobs", j['id'], j['ref'], "job_ref"): st.rerun()
+        else: st.caption("No archived records.")
 
 # --- PAGE: INSTALLATIONS ---
 elif page == "🛠️ Installations":
-    st.title("🛠️ Installation Tracker")
+    st.title("Installation Pipeline")
     
-    with st.expander("➕ Add New Installation Ticket", expanded=False):
-        st.caption("Ticket numbers will be generated automatically (KF1...)")
-        
+    with st.expander("➕ Create Installation Ticket", expanded=False):
         c_opts = ["None"] + [c['Name'] for c in customers] if customers else ["None"]
         i_cust = st.selectbox("Assign Customer", c_opts, key="inst_add_cust")
         
-        default_pc = ""
-        default_dir = ""
+        default_pc, default_dir = "", ""
         if i_cust != "None":
             cust_data = next((c for c in customers if c['Name'] == i_cust), None)
             if cust_data:
@@ -861,12 +856,12 @@ elif page == "🛠️ Installations":
 
         i_c1, i_c2 = st.columns(2)
         i_pc = i_c1.text_input("Postcode", value=default_pc, key="inst_add_pc")
-        i_desc = i_c2.text_input("Description (Optional)", key="inst_add_desc") 
+        i_desc = i_c2.text_input("Project Scope / Notes", key="inst_add_desc") 
         
-        i_dir = st.text_input("Director Name (Optional)", value=default_dir, key="inst_add_dir") 
-        i_stat = st.select_slider("Status", options=["Not passed Finance", "Passed Finance", "Kit Ordered", "Kit Arrived"], value="Not passed Finance", key="inst_add_stat")
+        i_dir = st.text_input("Project Lead", value=default_dir, key="inst_add_dir") 
+        i_stat = st.select_slider("Initial Stage", options=["Not passed Finance", "Passed Finance", "Kit Ordered", "Kit Arrived"], value="Not passed Finance", key="inst_add_stat")
         
-        if st.button("Create Installation Ticket", type="primary"):
+        if st.button("Generate Ticket", type="primary"):
             if not i_pc:
                 st.error("Postcode is required.")
             else:
@@ -876,175 +871,154 @@ elif page == "🛠️ Installations":
                     st.success(f"Ticket Created: {ticket_num}")
                     if coords: st.info(find_nearest_engineer_text(coords[0], coords[1], engineers))
                     time.sleep(3); st.rerun()
-                else: st.error("Failed to create ticket")
+                else: st.error("Failed to generate ticket.")
 
     active_inst = [i for i in installs if i.get('status') != 'Completed']
     comp_inst = [i for i in installs if i.get('status') == 'Completed']
 
-    st.subheader("Active Installations")
+    st.subheader("Active Projects")
     if active_inst:
-        ih1, ih2, ih3, ih4 = st.columns([2, 2, 4, 2])
-        ih1.markdown("**Ticket No.**")
-        ih2.markdown("**Details**") 
-        ih3.markdown("**Status**")
-        ih4.markdown("**Action**")
+        ih1, ih2, ih3, ih4 = st.columns([2, 3, 3, 2])
+        ih1.markdown("**Ticket ID**")
+        ih2.markdown("**Project Details**") 
+        ih3.markdown("**Pipeline Stage**")
+        ih4.markdown("**Manage**")
         st.divider()
         for inst in active_inst:
-            ic1, ic2, ic3, ic4 = st.columns([2, 2, 4, 2])
-            ic1.write(inst['ref'])
+            ic1, ic2, ic3, ic4 = st.columns([2, 3, 3, 2])
+            ic1.write(f"`{inst['ref']}`")
             details = f"📍 {inst['postcode']}"
-            if inst.get('customer'): details += f"\n🏢 {inst['customer']}"
-            if inst.get('desc'): details += f"\n📝 {inst['desc']}"
-            ic2.text(details)
+            if inst.get('customer'): details += f" | 🏢 {inst['customer']}"
+            if inst.get('desc'): details += f" | 📝 {inst['desc']}"
+            ic2.caption(details)
             
             current_status = inst.get('status', 'Not passed Finance')
             options = ["Not passed Finance", "Passed Finance", "Kit Ordered", "Kit Arrived"]
-            # Ensure current status is in the options for slider (if it was somehow saved differently)
-            if current_status not in options and current_status != 'Completed':
-                options.insert(0, current_status)
+            if current_status not in options and current_status != 'Completed': options.insert(0, current_status)
                 
-            new_status = ic3.select_slider("Status", options=options, value=current_status if current_status in options else options[0], key=f"sl_inst_{inst['id']}", label_visibility="collapsed")
+            new_status = ic3.select_slider("Stage", options=options, value=current_status if current_status in options else options[0], key=f"sl_inst_{inst['id']}", label_visibility="collapsed")
             if new_status != current_status and current_status in options:
                 update_install_status(inst['id'], new_status)
-                st.toast(f"Updated {inst['ref']}")
+                st.toast(f"Pipeline updated for {inst['ref']}")
                 time.sleep(0.5); st.rerun()
             
             with ic4:
                 btn_col1, btn_col2 = st.columns(2)
-                if btn_col1.button("✅", key=f"comp_i_{inst['id']}", help="Mark Complete"):
+                if btn_col1.button("✅", key=f"comp_i_{inst['id']}", help="Mark as Completed"):
                     update_install_status(inst['id'], "Completed")
                     st.rerun()
-                if btn_col2.button("🗑️", key=f"del_inst_{inst['id']}", help="Delete Install"):
-                    if delete_record("Installs", inst['id'], inst['ref'], "job_ref"):
-                        st.rerun()
-    else: st.info("No active installations.")
+                if btn_col2.button("🗑️", key=f"del_inst_{inst['id']}", help="Delete Project"):
+                    if delete_record("Installs", inst['id'], inst['ref'], "job_ref"): st.rerun()
+    else: st.info("No active installation projects.")
 
     st.divider()
-    with st.expander("✅ Completed Records", expanded=False):
+    with st.expander("📦 Archived / Completed", expanded=False):
         if comp_inst:
             for inst in comp_inst:
                 c1, c2, c3 = st.columns([2, 5, 1])
-                c1.write(f"**{inst['ref']}**")
-                c2.write(f"{inst.get('customer', 'Unknown')} - Completed")
-                if c3.button("Delete", key=f"del_comp_i_{inst['id']}"):
-                    if delete_record("Installs", inst['id'], inst['ref'], "job_ref"):
-                        st.rerun()
-        else:
-            st.caption("No completed records.")
+                c1.write(f"`{inst['ref']}`")
+                c2.write(f"*{inst.get('customer', 'Unknown')}* - **Completed**")
+                if c3.button("Purge", key=f"del_comp_i_{inst['id']}"):
+                    if delete_record("Installs", inst['id'], inst['ref'], "job_ref"): st.rerun()
+        else: st.caption("No archived records.")
 
 # --- PAGE: CUSTOMERS ---
 elif page == "👥 Customers":
-    
-    # Check if a specific customer profile is requested
     if st.session_state.selected_customer:
         cust_name = st.session_state.selected_customer
-        st.title(f"👤 {cust_name}")
+        st.title(f"🏢 {cust_name}")
         
         c_left, c_right = st.columns([5, 1])
         with c_right:
-            if st.button("⬅️ Back to List", type="primary", use_container_width=True):
+            if st.button("⬅️ Directory", type="primary", use_container_width=True):
                 st.session_state.selected_customer = None
                 st.rerun()
                 
-        # Find customer record
         c_data = next((c for c in customers if c['Name'] == cust_name), None)
         
         if c_data:
-            with st.expander("🏢 Company Information", expanded=True):
+            with st.container():
                 col1, col2, col3 = st.columns(3)
-                col1.markdown(f"**Postcode:** {c_data.get('Postcode', '-')}")
-                col1.markdown(f"**Registration No:** {c_data.get('Registration_Number', '-')}")
-                col2.markdown(f"**Email:** {c_data.get('Email', '-')}")
-                col2.markdown(f"**Phone:** {c_data.get('Phone', '-')}")
-                col3.markdown(f"**Directors:** {c_data.get('Directors', '-')}")
-                col3.markdown(f"**Offices:** {c_data.get('Offices', '-')}")
+                col1.markdown(f"**📍 Main Postcode:** `{c_data.get('Postcode', '-')}`")
+                col1.markdown(f"**📋 Registration No:** `{c_data.get('Registration_Number', '-')}`")
+                col2.markdown(f"**✉️ Email:** `{c_data.get('Email', '-')}`")
+                col2.markdown(f"**📞 Phone:** `{c_data.get('Phone', '-')}`")
+                col3.markdown(f"**👔 Directors:** {c_data.get('Directors', '-')}")
+                col3.markdown(f"**🏢 Branches:** {c_data.get('Offices', '-')}")
                 if c_data.get('Notes'):
-                    st.caption("Notes:")
-                    st.info(c_data.get('Notes'))
+                    st.info(f"**Notes:** {c_data.get('Notes')}")
             
-            with st.expander("🛒 Services & Licenses", expanded=True):
-                s1, s2, s3, s4 = st.columns(4)
-                s1.metric("VoIP Lines", c_data.get('VoIP_Lines', 0))
-                s2.metric("Handsets", c_data.get('Handsets', 0))
-                s3.metric("Software Licenses", c_data.get('Software_Licenses', 0))
-                s4.metric("Total Licenses", c_data.get('Total_Licenses', 0))
+            st.divider()
+            st.subheader("Service Subscriptions")
+            s1, s2, s3, s4 = st.columns(4)
+            s1.metric("VoIP Lines", c_data.get('VoIP_Lines', 0))
+            s2.metric("Handsets", c_data.get('Handsets', 0))
+            s3.metric("Software Licenses", c_data.get('Software_Licenses', 0))
+            s4.metric("Total Licenses", c_data.get('Total_Licenses', 0))
             
             st.divider()
             
-            # Historical Data
-            st.subheader("📑 Job History & Active Tickets")
+            st.subheader("Ticket History")
             c_jobs = [j for j in jobs if j.get('customer') == cust_name]
             c_inst = [i for i in installs if i.get('customer') == cust_name]
             c_tickets = [j['ref'] for j in c_jobs] + [i['ref'] for i in c_inst]
             c_sched = [s for s in all_schedule if s.get('job_ref') in c_tickets]
             
-            tab_maint, tab_inst, tab_diary = st.tabs(["Maintenance", "Installations", "Schedule Events"])
+            tab_maint, tab_inst, tab_diary = st.tabs(["Maintenance Logs", "Installation Logs", "Scheduling Events"])
             
             with tab_maint:
-                if c_jobs:
-                    st.dataframe(pd.DataFrame(c_jobs)[['ref', 'status', 'desc', 'severity', 'lat', 'lon']], hide_index=True, use_container_width=True)
-                else: st.caption("No maintenance records.")
+                if c_jobs: st.dataframe(pd.DataFrame(c_jobs)[['ref', 'status', 'desc', 'severity']], hide_index=True, use_container_width=True)
+                else: st.caption("No maintenance logs.")
                 
             with tab_inst:
-                if c_inst:
-                    st.dataframe(pd.DataFrame(c_inst)[['ref', 'status', 'desc', 'postcode']], hide_index=True, use_container_width=True)
-                else: st.caption("No installation records.")
+                if c_inst: st.dataframe(pd.DataFrame(c_inst)[['ref', 'status', 'desc']], hide_index=True, use_container_width=True)
+                else: st.caption("No installation logs.")
                 
             with tab_diary:
-                if c_sched:
-                    st.dataframe(pd.DataFrame(c_sched)[['scheduled_date', 'engineer_name', 'job_ref', 'notes']], hide_index=True, use_container_width=True)
-                else: st.caption("No scheduled events found for these tickets.")
-        else:
-            st.error("Customer details not found in database.")
+                if c_sched: st.dataframe(pd.DataFrame(c_sched)[['scheduled_date', 'engineer_name', 'job_ref', 'notes']], hide_index=True, use_container_width=True)
+                else: st.caption("No scheduling events attached to this account.")
+        else: st.error("Account not found.")
 
-    # Show Directory if no specific customer is selected
     else:
-        st.title("👥 Customer Directory")
+        st.title("Customer Accounts")
         
-        # Select customer from list
         if customers:
-            st.subheader("🔍 Find Customer")
-            cust_opts = ["-- Select a Customer --"] + [c['Name'] for c in customers]
-            
             def profile_select_callback():
                 val = st.session_state.profile_select_val
-                if val and val != "-- Select a Customer --":
+                if val and val != "-- Select Account --":
                     st.session_state.selected_customer = val
-                    if val in st.session_state.recent_customers:
-                        st.session_state.recent_customers.remove(val)
+                    if val in st.session_state.recent_customers: st.session_state.recent_customers.remove(val)
                     st.session_state.recent_customers.insert(0, val)
                     st.session_state.recent_customers = st.session_state.recent_customers[:3]
 
-            st.selectbox("Open Profile", cust_opts, key="profile_select_val", on_change=profile_select_callback, label_visibility="collapsed")
+            c1, c2 = st.columns([3, 1])
+            with c1:
+                cust_opts = ["-- Select Account --"] + [c['Name'] for c in customers]
+                st.selectbox("Search Directory", cust_opts, key="profile_select_val", on_change=profile_select_callback)
             
-            st.divider()
-            st.subheader("🕒 Recently Viewed")
             if st.session_state.recent_customers:
-                for rc in st.session_state.recent_customers:
-                    if st.button(f"👤 {rc}", key=f"rec_{rc}", use_container_width=True):
+                st.markdown("**Recently Viewed**")
+                r_cols = st.columns(3)
+                for i, rc in enumerate(st.session_state.recent_customers):
+                    if r_cols[i].button(f"🏢 {rc}", key=f"rec_{rc}", use_container_width=True):
                         st.session_state.selected_customer = rc
-                        if rc in st.session_state.recent_customers:
-                            st.session_state.recent_customers.remove(rc)
+                        if rc in st.session_state.recent_customers: st.session_state.recent_customers.remove(rc)
                         st.session_state.recent_customers.insert(0, rc)
                         st.session_state.recent_customers = st.session_state.recent_customers[:3]
                         st.rerun()
-            else:
-                st.info("No recent customers. Search for one above to get started.")
-            
             st.divider()
         
-        st.subheader("🤖 Auto-Find Company Info (AI)")
-        st.caption("Enter the business name and postcode, and AI will search public records for contact info and directors.")
+        st.subheader("🤖 AI Account Enrichment")
+        st.caption("Auto-fetch corporate data using Gemini AI via Name and Postcode.")
         with st.form("ai_find_form"):
             c1, c2 = st.columns([3, 1])
-            search_name = c1.text_input("Registered Business Name")
-            search_pc = c2.text_input("Postcode")
+            search_name = c1.text_input("Registered Entity Name")
+            search_pc = c2.text_input("Primary Postcode")
             
-            if st.form_submit_button("Search AI", type="primary"):
-                if not search_name:
-                    st.warning("Please enter a business name to search.")
+            if st.form_submit_button("Fetch Data", type="primary"):
+                if not search_name: st.warning("Please enter a business name to search.")
                 else:
-                    with st.spinner("Searching public records..."):
+                    with st.spinner("Querying registry..."):
                         ai_data = fetch_company_info_ai(search_name, search_pc)
                         if ai_data:
                             st.session_state.cust_draft['name'] = search_name
@@ -1054,42 +1028,36 @@ elif page == "👥 Customers":
                             st.session_state.cust_draft['directors'] = ai_data.get('directors', '')
                             st.session_state.cust_draft['reg_no'] = ai_data.get('registration_number', '')
                             st.session_state.cust_draft['offices'] = ai_data.get('offices', '')
-                            st.session_state.cust_draft['voip'] = ai_data.get('voip', 0)
-                            st.session_state.cust_draft['handsets'] = ai_data.get('handsets', 0)
-                            st.session_state.cust_draft['software'] = ai_data.get('software', 0)
-                            st.session_state.cust_draft['total_lic'] = ai_data.get('total_lic', 0)
-                            st.success("Information found! Review and save below.")
-                        else:
-                            st.warning("Could not automatically retrieve data. Please fill manually below.")
+                            st.success("Data retrieved. Please verify and save below.")
+                        else: st.warning("Automated retrieval failed. Please input manually.")
 
-        st.subheader("📝 Manual Entry & Save")
+        st.subheader("New Account Registration")
         with st.form("new_customer_form"):
             c1, c2 = st.columns(2)
-            c_name = c1.text_input("Customer / Company Name", value=st.session_state.cust_draft.get('name', ''))
-            c_pc = c2.text_input("Main Postcode", value=st.session_state.cust_draft.get('pc', ''))
+            c_name = c1.text_input("Account Name *", value=st.session_state.cust_draft.get('name', ''))
+            c_pc = c2.text_input("Main Postcode *", value=st.session_state.cust_draft.get('pc', ''))
             
             c3, c4 = st.columns(2)
-            c_email = c3.text_input("Email Address", value=st.session_state.cust_draft.get('email', ''))
-            c_phone = c4.text_input("Phone Number", value=st.session_state.cust_draft.get('phone', ''))
+            c_email = c3.text_input("Corporate Email", value=st.session_state.cust_draft.get('email', ''))
+            c_phone = c4.text_input("Contact Number", value=st.session_state.cust_draft.get('phone', ''))
             
             c5, c6 = st.columns(2)
-            c_directors = c5.text_input("Main Directors", value=st.session_state.cust_draft.get('directors', ''))
-            c_reg = c6.text_input("Business Registration Number", value=st.session_state.cust_draft.get('reg_no', ''))
+            c_directors = c5.text_input("Directors / Key Personnel", value=st.session_state.cust_draft.get('directors', ''))
+            c_reg = c6.text_input("Registry Number", value=st.session_state.cust_draft.get('reg_no', ''))
             
-            c_offices = st.text_area("Multiple Offices / Addresses", value=st.session_state.cust_draft.get('offices', ''))
+            c_offices = st.text_area("Branch Network", value=st.session_state.cust_draft.get('offices', ''))
             
-            st.markdown("##### 🛒 Services Sold")
+            st.markdown("##### Assigned Services")
             s1, s2, s3, s4 = st.columns(4)
             s_voip = s1.number_input("VoIP Lines", min_value=0, value=int(st.session_state.cust_draft.get('voip', 0)))
             s_handsets = s2.number_input("Handsets", min_value=0, value=int(st.session_state.cust_draft.get('handsets', 0)))
-            s_soft = s3.number_input("Software Licenses", min_value=0, value=int(st.session_state.cust_draft.get('software', 0)))
-            s_total = s4.number_input("Total Licenses", min_value=0, value=int(st.session_state.cust_draft.get('total_lic', 0)))
+            s_soft = s3.number_input("Software Lic.", min_value=0, value=int(st.session_state.cust_draft.get('software', 0)))
+            s_total = s4.number_input("Total Lic.", min_value=0, value=int(st.session_state.cust_draft.get('total_lic', 0)))
 
-            c_notes = st.text_area("Customer Notes", value=st.session_state.cust_draft.get('notes', ''))
+            c_notes = st.text_area("Internal Notes", value=st.session_state.cust_draft.get('notes', ''))
             
-            if st.form_submit_button("Save Customer", type="primary"):
-                if not c_name or not c_pc:
-                    st.error("Error: Customer Name and Postcode are required.")
+            if st.form_submit_button("Register Account", type="primary"):
+                if not c_name or not c_pc: st.error("Account Name and Postcode are strictly required.")
                 else:
                     try:
                         supabase.table("Customers").insert({
@@ -1099,64 +1067,62 @@ elif page == "👥 Customers":
                             "VoIP_Lines": s_voip, "Handsets": s_handsets, "Software_Licenses": s_soft, "Total_Licenses": s_total,
                             "Notes": c_notes
                         }).execute()
-                        st.success("Customer saved successfully!")
+                        st.success("Account registered.")
                         st.session_state.cust_draft = {"name": "", "pc": "", "email": "", "phone": "", "directors": "", "reg_no": "", "offices": "", "notes": "", "voip": 0, "handsets": 0, "software": 0, "total_lic": 0}
                         time.sleep(1); st.rerun()
-                    except Exception as e:
-                        st.error(f"Error saving customer. Ensure columns VoIP_Lines, Handsets, Software_Licenses, Total_Licenses (int8) exist. Error: {e}")
+                    except Exception as e: st.error(f"Registry Error: {e}")
 
 # --- PAGE: SCHEDULE WORK ---
 elif page == "📅 Schedule Work":
-    st.title("📅 Schedule Management")
+    st.title("Workforce Allocation")
     eng_names = [e['name'] for e in engineers] if engineers else []
-    sel_date = st.date_input("Date to Schedule", min_value=datetime.today())
+    sel_date = st.date_input("Target Date", min_value=datetime.today())
     
     col_forms, col_sched = st.columns([1, 1])
     
     with col_forms:
-        st.subheader("Assign Tasks")
+        st.subheader("Dispatch Orders")
         
-        with st.expander("🔧 Maintenance", expanded=True):
+        with st.expander("🔧 Maintenance Dispatch", expanded=True):
             with st.form("schedule_maint_form"):
-                m_eng = st.selectbox("Engineer", eng_names, key="m_eng")
+                m_eng = st.selectbox("Assignee", eng_names, key="m_eng")
                 maint_options = [j['ref'] for j in jobs if j.get('status') != 'Completed'] if jobs else []
-                m_ref = st.selectbox("Maintenance Ticket", maint_options, index=None, placeholder="Select Ticket...", key="m_ref")
-                m_notes = st.text_area("Notes", key="m_notes")
-                if st.form_submit_button("Assign Maintenance", type="primary"):
+                m_ref = st.selectbox("Select Ticket", maint_options, index=None, key="m_ref")
+                m_notes = st.text_area("Dispatch Notes", key="m_notes")
+                if st.form_submit_button("Confirm Dispatch", type="primary"):
                     if m_eng and m_ref:
                         if add_schedule_item(st.session_state.company_id, m_eng, m_ref, sel_date, m_notes, "Maintenance"):
-                            st.success(f"Assigned {m_eng} to {m_ref}"); time.sleep(1); st.rerun()
-                    else: st.warning("Select Engineer and Ticket")
+                            st.success("Dispatch confirmed."); time.sleep(1); st.rerun()
+                    else: st.warning("Requires Assignee and Ticket.")
                     
-        with st.expander("🛠️ Installation", expanded=False):
+        with st.expander("🛠️ Installation Dispatch", expanded=False):
             with st.form("schedule_install_form"):
-                i_eng = st.selectbox("Engineer", eng_names, key="i_eng")
+                i_eng = st.selectbox("Assignee", eng_names, key="i_eng")
                 inst_options = [i['ref'] for i in installs if i.get('status') != 'Completed'] if installs else []
-                i_ref = st.selectbox("Installation Ticket", inst_options, index=None, placeholder="Select Ticket...", key="i_ref")
-                i_notes = st.text_area("Notes", key="i_notes")
-                if st.form_submit_button("Assign Installation", type="primary"):
+                i_ref = st.selectbox("Select Ticket", inst_options, index=None, key="i_ref")
+                i_notes = st.text_area("Dispatch Notes", key="i_notes")
+                if st.form_submit_button("Confirm Dispatch", type="primary"):
                     if i_eng and i_ref:
                         if add_schedule_item(st.session_state.company_id, i_eng, i_ref, sel_date, i_notes, "Install"):
-                            st.success(f"Assigned {i_eng} to {i_ref}"); time.sleep(1); st.rerun()
-                    else: st.warning("Select Engineer and Ticket")
+                            st.success("Dispatch confirmed."); time.sleep(1); st.rerun()
+                    else: st.warning("Requires Assignee and Ticket.")
                     
-        with st.expander("📝 Note / Message", expanded=False):
+        with st.expander("📝 General Memo", expanded=False):
             with st.form("diary_note_form"):
-                n_eng = st.selectbox("For Engineer (Optional)", ["All"] + eng_names, key="n_eng")
-                n_msg = st.text_area("Message / Special Request")
-                if st.form_submit_button("Add Note", type="primary"):
+                n_eng = st.selectbox("Recipient", ["All"] + eng_names, key="n_eng")
+                n_msg = st.text_area("Memo Content")
+                if st.form_submit_button("Broadcast Memo", type="primary"):
                     if n_msg:
                         target = "ALL STAFF" if n_eng == "All" else n_eng
                         add_schedule_item(st.session_state.company_id, target, "NOTE", sel_date, n_msg, "Note")
-                        st.success("Note Added"); time.sleep(1); st.rerun()
+                        st.success("Memo broadcasted."); time.sleep(1); st.rerun()
 
     with col_sched:
         c_head, c_filt = st.columns([3, 2])
-        c_head.subheader("📆 Week Schedule")
-        focus_date = c_filt.date_input("Week of:", value=datetime.today(), label_visibility="collapsed", key="sch_date")
+        c_head.subheader("Master Calendar")
+        focus_date = c_filt.date_input("Week Origin:", value=datetime.today(), label_visibility="collapsed", key="sch_date")
         
         start_of_week = focus_date - timedelta(days=focus_date.weekday())
-        end_of_week = start_of_week + timedelta(days=6)
         
         days_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
         
@@ -1166,8 +1132,7 @@ elif page == "📅 Schedule Work":
             day_items = [item for item in all_schedule if item.get('scheduled_date') == day_str]
             
             with st.expander(f"{days_names[i]} - {current_day.strftime('%d/%m')}", expanded=(current_day == date.today() or bool(day_items))):
-                if not day_items:
-                    st.caption("No jobs scheduled.")
+                if not day_items: st.caption("No events block.")
                 for item in day_items:
                     note_text = str(item.get('notes', ''))
                     if "[INSTALL]" in note_text: css_class = "install"
@@ -1178,76 +1143,73 @@ elif page == "📅 Schedule Work":
                     if css_class == "note": content = note_text.replace("[NOTE]", "").strip()
                     
                     st.markdown(f"""
-                    <div class="schedule-card {css_class}" style="padding: 5px 10px; margin-bottom: 5px;">
-                        <small style="color: gray;"><b>{item['engineer_name']}</b></small><br>
+                    <div class="schedule-card {css_class}">
+                        <small style="opacity: 0.7;"><b>{item['engineer_name']}</b></small><br>
                         <span style="font-size: 0.95em;">{content}</span>
                     </div>
                     """, unsafe_allow_html=True)
 
 # --- PAGE: DATA UPLOAD ---
 elif page == "⬆️ Data Upload":
-    st.title("⬆️ Data Upload & Entry")
+    st.title("System Integration")
     
-    with st.expander("🚦 Single Eng. Manager", expanded=False):
-        st.caption("Quickly update a single engineer's status or color from here.")
+    with st.expander("🚦 Quick Admin Overrides", expanded=False):
         if engineers:
             eng_map = {e['name']: e['id'] for e in engineers}
-            s_name = st.selectbox("Select Engineer", list(eng_map.keys()), key="se_upload")
+            s_name = st.selectbox("Select Target", list(eng_map.keys()), key="se_upload")
             curr = next((e for e in engineers if e['name'] == s_name), None)
             
             stat = curr['status'] if curr else "Active"
             status_options = ["Active", "Home", "Driving", "On Site", "In Office", "Sick", "Holiday"]
             try: stat_index = status_options.index(stat)
             except: stat_index = 0 
-            new_stat = st.radio("Status:", status_options, index=stat_index, key="se_stat")
+            new_stat = st.radio("Override Status:", status_options, index=stat_index, key="se_stat")
             
             color_opts = ["blue", "green", "red", "purple", "orange", "darkred", "lightred", "beige", "darkblue", "darkgreen", "cadetblue", "darkpurple", "white", "pink", "lightblue", "lightgreen", "gray", "black", "lightgray"]
             curr_color = curr.get('pin_color')
             if curr_color: curr_color = curr_color.split()[0].lower()
             if not curr_color or curr_color not in color_opts: curr_color = "blue"
-            new_color = st.selectbox("Pin Color:", color_opts, index=color_opts.index(curr_color), key="se_col")
+            new_color = st.selectbox("Map Pin Hash:", color_opts, index=color_opts.index(curr_color), key="se_col")
             
-            if st.button("Update Engineer Status", type="primary"):
+            if st.button("Apply Overrides", type="primary"):
                 try:
-                    payload = {"status": new_stat, "pin_color": new_color}
-                    supabase.table("Engineers").update(payload).eq("id", eng_map[s_name]).execute()
-                    st.success("Engineer Updated")
-                    time.sleep(1)
-                    st.rerun()
+                    supabase.table("Engineers").update({"status": new_stat, "pin_color": new_color}).eq("id", eng_map[s_name]).execute()
+                    st.success("Override applied.")
+                    time.sleep(1); st.rerun()
                 except: pass
     
     st.divider()
 
-    tab_single, tab_bulk = st.tabs(["Add Single Record", "Bulk Excel Upload"])
+    tab_single, tab_bulk = st.tabs(["Manual Provisioning", "Batch Ingestion (.xlsx)"])
     
     with tab_single:
-        st.subheader("New Engineer")
+        st.subheader("Provision New Personnel")
         with st.form("add_user_form"):
-            u_n = st.text_input("Name")
-            u_p = st.text_input("Postcode")
-            u_color = st.selectbox("Pin Color", ["blue", "green", "red", "purple", "orange", "darkred", "cadetblue"])
-            if st.form_submit_button("Add User", type="primary"):
-                if not u_n or not u_p:
-                    st.error("Name and Postcode are required.")
+            c1, c2 = st.columns(2)
+            u_n = c1.text_input("Full Name")
+            u_p = c2.text_input("Base Postcode")
+            u_color = st.selectbox("Initial Map Hash", ["blue", "green", "red", "purple", "orange", "darkred", "cadetblue"])
+            if st.form_submit_button("Provision Personnel", type="primary"):
+                if not u_n or not u_p: st.error("Name and Postcode mandatory.")
                 else:
                     ok, m, coords = add_entry("Engineers", "Name", u_n, u_p, st.session_state.company_id, pin_color=u_color)
-                    if ok: st.success(m); time.sleep(1); st.rerun()
+                    if ok: st.success("Provisioned."); time.sleep(1); st.rerun()
                     else: st.error(m)
 
     with tab_bulk:
-        st.subheader("Upload .xlsx File")
-        u_file = st.file_uploader("Choose Excel File", type=['xlsx'])
-        u_type = st.radio("Content Contains:", ["Users", "Jobs"])
-        if u_file and st.button("Start Upload", type="primary"):
+        st.subheader("Batch Dataset Ingestion")
+        u_file = st.file_uploader("Select structured .xlsx payload", type=['xlsx'])
+        u_type = st.radio("Schema Mapping:", ["Users", "Jobs"])
+        if u_file and st.button("Execute Ingestion", type="primary"):
             try:
                 df = pd.read_excel(u_file)
                 cols = [c.lower() for c in df.columns]
                 has_name = 'name' in cols if u_type == "Users" else 'ref' in cols
                 if has_name and 'postcode' in cols:
                     t_flag = "user" if u_type == "Users" else "job"
-                    with st.spinner('Uploading data to cloud...'):
+                    with st.spinner('Ingesting payload to central cluster...'):
                         cnt = process_bulk_upload(df, t_flag, st.session_state.company_id)
-                    st.success(f"Successfully Uploaded {cnt} records.")
+                    st.success(f"Ingestion complete: {cnt} vectors stored.")
                     time.sleep(1); st.rerun()
-                else: st.error("Error: File must contain 'Name' (or 'Ref' for Jobs) and 'Postcode' columns.")
-            except Exception as e: st.error(f"File processing error: {e}")
+                else: st.error("Schema validation failed: Missing required columns.")
+            except Exception as e: st.error(f"Ingestion Fault: {e}")
