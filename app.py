@@ -40,12 +40,18 @@ if 'search_result' not in st.session_state: st.session_state.search_result = Non
 if 'search_active' not in st.session_state: st.session_state.search_active = False
 if 'route_stops' not in st.session_state: st.session_state.route_stops = []
 if 'cached_routes' not in st.session_state: st.session_state.cached_routes = []
-if 'theme_toggle' not in st.session_state: st.session_state.theme_toggle = True # Default to Light Mode for CRM feel
 if 'selected_customer' not in st.session_state: st.session_state.selected_customer = None
 if 'recent_customers' not in st.session_state: st.session_state.recent_customers = []
 if 'main_menu' not in st.session_state: st.session_state.main_menu = "🏠 Dashboard"
 if 'cust_draft' not in st.session_state: 
     st.session_state.cust_draft = {"name": "", "pc": "", "email": "", "phone": "", "directors": "", "reg_no": "", "offices": "", "notes": "", "voip": 0, "handsets": 0, "software": 0, "total_lic": 0}
+
+# Theme State (Decoupled from widget to prevent unmount reset issues)
+if 'is_light_mode' not in st.session_state: 
+    st.session_state.is_light_mode = False 
+
+def toggle_theme():
+    st.session_state.is_light_mode = not st.session_state.is_light_mode
 
 # --- AUTH ---
 def check_login(username, password):
@@ -56,31 +62,8 @@ def check_login(username, password):
         return username if res.data else None
     except: return None
 
-# --- LOGIN SCREEN ---
-if not st.session_state.logged_in:
-    st.markdown("<style>.stApp { background-color: #0f172a; color: #ffffff; }</style>", unsafe_allow_html=True)
-    login_holder = st.empty() 
-    with login_holder.container():
-        col1, col2, col3 = st.columns([1, 8, 1])
-        with col2:
-            st.markdown(f"<h1 style='text-align: center; color: white; margin-top: 100px;'>💼 {APP_NAME} Access</h1>", unsafe_allow_html=True)
-            with st.form("login"):
-                user = st.text_input("Username", key="login_username_input")
-                pw = st.text_input("Password", type="password", key="login_password_input")
-                
-                if st.form_submit_button("Secure Login"): 
-                    res = check_login(user, pw)
-                    if res:
-                        st.session_state.logged_in = True
-                        st.session_state.is_admin = (res == "ADMIN")
-                        st.session_state.company_id = "demo" if res == "ADMIN" else res
-                        login_holder.empty() 
-                        st.rerun()
-                    else: st.error("Access Denied")
-    st.stop()
-
-# --- THEME CONFIGURATION ---
-is_light = st.session_state.theme_toggle
+# --- THEME CONFIGURATION & CSS ---
+is_light = st.session_state.is_light_mode
 
 if is_light:
     # Modern Light Mode (Salesforce/Hubspot style)
@@ -93,7 +76,7 @@ else:
     button_bg, button_text, primary_btn = "#334155", "#f8fafc", "#3b82f6"
     tiles_style = "CartoDB dark_matter"
 
-# --- 🎨 ENTERPRISE UI CSS OVERHAUL ---
+# Global CSS Injection (Applied instantly to whole app)
 st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
@@ -101,66 +84,57 @@ st.markdown(f"""
     * {{ font-family: 'Inter', sans-serif !important; }}
 
     /* Main Backgrounds */
-    .stApp {{ background-color: {bg_color}; color: {text_color}; }}
-    [data-testid="stSidebar"] {{ background-color: {sidebar_bg}; border-right: 1px solid {border_color}; }}
+    .stApp, [data-testid="stHeader"] {{ background-color: {bg_color} !important; }}
+    [data-testid="stSidebar"] {{ background-color: {sidebar_bg} !important; border-right: 1px solid {border_color} !important; }}
     
     /* Make Sidebar Text Professional */
     [data-testid="stSidebar"] .stRadio label p {{ font-size: 1.05rem !important; font-weight: 500; padding: 6px 0px; color: {text_color}; }}
     
     /* Metrics Cards */
     [data-testid="stMetric"] {{
-        background-color: {card_bg};
-        border: 1px solid {border_color};
-        padding: 15px 20px;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        background-color: {card_bg}; border: 1px solid {border_color}; padding: 15px 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }}
+    [data-testid="stMetricValue"] > div {{ color: {text_color} !important; }}
+    [data-testid="stMetricLabel"] > div > p {{ color: {text_color} !important; opacity: 0.8; }}
     
     /* Inputs */
     .stTextInput input, .stSelectbox div[data-baseweb="select"], .stTextArea textarea, .stNumberInput input {{
-        background-color: {card_bg}; color: {text_color}; border: 1px solid {border_color}; border-radius: 6px;
-        box-shadow: 0 1px 2px rgba(0,0,0,0.02);
+        background-color: {card_bg} !important; color: {text_color} !important; border: 1px solid {border_color} !important; border-radius: 6px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.02); -webkit-text-fill-color: {text_color} !important;
     }}
     .stTextInput input:focus, .stTextArea textarea:focus, .stNumberInput input:focus {{ 
-        border-color: {primary_btn}; 
-        box-shadow: 0 0 0 1px {primary_btn};
+        border-color: {primary_btn} !important; box-shadow: 0 0 0 1px {primary_btn} !important;
     }}
     
     /* Standard Buttons */
-    .stButton button {{ 
-        background-color: {button_bg} !important; 
-        border: 1px solid {border_color} !important; 
-        border-radius: 6px; 
-        font-weight: 500;
-        transition: all 0.2s ease; 
+    .stButton > button {{ 
+        background-color: {button_bg} !important; border: 1px solid {border_color} !important; border-radius: 6px; font-weight: 500; transition: all 0.2s ease; 
     }}
-    .stButton button p {{ color: {button_text} !important; font-weight: 500; }}
-    .stButton button:hover {{ border-color: {primary_btn} !important; transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
-    .stButton button:hover p {{ color: {primary_btn} !important; }}
+    .stButton > button p {{ color: {button_text} !important; font-weight: 500; }}
+    .stButton > button:hover {{ border-color: {primary_btn} !important; transform: translateY(-1px); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }}
+    .stButton > button:hover p {{ color: {primary_btn} !important; }}
 
     /* Primary Form Submit Buttons */
-    .stButton button[kind="primary"] {{ background-color: {primary_btn} !important; border-color: {primary_btn} !important; }}
-    .stButton button[kind="primary"] p {{ color: #ffffff !important; font-weight: 600; }}
-    .stButton button[kind="primary"]:hover {{ opacity: 0.9; transform: translateY(-1px); }}
-    .stButton button[kind="primary"]:hover p {{ color: #ffffff !important; }}
+    .stButton > button[kind="primary"] {{ background-color: {primary_btn} !important; border-color: {primary_btn} !important; }}
+    .stButton > button[kind="primary"] p {{ color: #ffffff !important; font-weight: 600; }}
+    .stButton > button[kind="primary"]:hover {{ opacity: 0.9; transform: translateY(-1px); }}
+    .stButton > button[kind="primary"]:hover p {{ color: #ffffff !important; }}
 
     /* Expander Cards */
-    .streamlit-expanderHeader {{ background-color: {card_bg}; border-radius: 6px; color: {text_color}; border: 1px solid {border_color}; font-weight: 600; }}
-    [data-testid="stExpander"] {{ border: none !important; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-radius: 6px; background-color: {card_bg}; }}
+    .streamlit-expanderHeader {{ background-color: {card_bg} !important; border-radius: 6px; color: {text_color} !important; border: 1px solid {border_color} !important; font-weight: 600; }}
+    [data-testid="stExpander"] {{ border: none !important; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border-radius: 6px; background-color: {card_bg} !important; }}
 
     /* Calendar Card Style */
     .schedule-card {{ 
-        background-color: {bg_color}; border: 1px solid {border_color}; 
-        border-radius: 6px; padding: 12px; margin-bottom: 12px; 
-        border-left: 4px solid {primary_btn}; 
-        color: {text_color}; 
+        background-color: {bg_color}; border: 1px solid {border_color}; border-radius: 6px; padding: 12px; margin-bottom: 12px; 
+        border-left: 4px solid {primary_btn}; color: {text_color}; 
     }}
     .schedule-card.install {{ border-left: 4px solid #8b5cf6; }}
     .schedule-card.note {{ border-left: 4px solid #f59e0b; }}
     
-    /* Fonts overrides */
+    /* Fonts overrides for legibility */
     h1, h2, h3, h4, h5, h6, label {{ color: {text_color} !important; font-weight: 600 !important; }}
-    .stMarkdown p {{ color: {text_color}; }}
+    div[data-testid="stMarkdownContainer"] > p {{ color: {text_color}; }}
     
     /* Hide Default Branding */
     #MainMenu {{visibility: hidden;}}
@@ -175,6 +149,33 @@ st.markdown(f"""
     }}
 </style>
 """, unsafe_allow_html=True)
+
+# --- LOGIN SCREEN ---
+if not st.session_state.logged_in:
+    login_holder = st.empty() 
+    with login_holder.container():
+        col1, col2, col3 = st.columns([1, 8, 1])
+        with col2:
+            st.markdown(f"<h1 style='text-align: center; margin-top: 100px;'>💼 {APP_NAME} Access</h1>", unsafe_allow_html=True)
+            with st.form("login"):
+                user = st.text_input("Username", key="login_username_input")
+                pw = st.text_input("Password", type="password", key="login_password_input")
+                
+                if st.form_submit_button("Secure Login", type="primary"): 
+                    res = check_login(user, pw)
+                    if res:
+                        st.session_state.logged_in = True
+                        st.session_state.is_admin = (res == "ADMIN")
+                        st.session_state.company_id = "demo" if res == "ADMIN" else res
+                        login_holder.empty() 
+                        st.rerun()
+                    else: st.error("Access Denied")
+    st.stop()
+
+# --- TOP BAR / THEME TOGGLE ---
+c1, c2 = st.columns([9, 1])
+with c2:
+    st.button("☀️ Light" if not is_light else "🌙 Dark", on_click=toggle_theme, use_container_width=True)
 
 # --- HELPER FUNCTIONS ---
 def generate_ticket(job_type):
@@ -462,11 +463,6 @@ installs = get_installs(st.session_state.company_id)
 customers = get_customers(st.session_state.company_id)
 all_schedule = get_schedule(st.session_state.company_id)
 
-# --- THEME TOGGLE (Top Right) ---
-c1, c2 = st.columns([9, 1])
-with c2:
-    st.toggle("☀️ Theme", key="theme_toggle", label_visibility="collapsed")
-
 # --- SIDEBAR NAVIGATION ---
 with st.sidebar:
     try: st.image(LOGO_FILENAME, width=220)
@@ -703,7 +699,7 @@ if page == "🏠 Dashboard":
                     
                     st.markdown(f"""
                     <div class="schedule-card {css_class}">
-                        <small style="color: {text_color}; opacity: 0.8;"><b>{item['engineer_name']}</b></small><br>
+                        <small style="opacity: 0.8;"><b>{item['engineer_name']}</b></small><br>
                         <span style="font-size: 0.95em;">{content}</span>
                     </div>
                     """, unsafe_allow_html=True)
