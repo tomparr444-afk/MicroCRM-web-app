@@ -27,7 +27,8 @@ GEMINI_API_KEY = st.secrets.get("GEMINI_API_KEY", "")
 st.set_page_config(page_title=APP_NAME, layout="wide", page_icon="💼", initial_sidebar_state="expanded")
 
 # --- DB CONNECTION ---
-@st.cache_resource
+# Removed @st.cache_resource here so it ALWAYS grabs the fresh 'service_role' key
+# and doesn't get stuck using a cached 'anon' key when RLS is active.
 def init_connection():
     try: return create_client(SUPABASE_URL, SUPABASE_KEY)
     except: return None
@@ -95,14 +96,14 @@ st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
     
-    /* Apply font safely without breaking Streamlit icons */
-    html, body, p, h1, h2, h3, h4, h5, h6, label, div[data-testid="stMarkdownContainer"] p {{
-        font-family: 'Inter', sans-serif !important;
+    /* Apply font gently to avoid breaking Streamlit's icon ligatures */
+    .stApp, h1, h2, h3, h4, h5, h6, label, input, textarea, button {{
+        font-family: 'Inter', sans-serif;
     }}
     
-    /* Specifically protect Streamlit's material icons */
-    i, .material-icons, .st-emotion-cache-1gfk4sg, span[class*="icon"] {{
-        font-family: 'Material Icons', 'Material Symbols Rounded' !important;
+    /* Protect material icons from font overrides */
+    .material-icons, .material-symbols-rounded {{
+        font-family: 'Material Symbols Rounded', 'Material Icons' !important;
     }}
 
     /* Main Backgrounds */
@@ -221,12 +222,14 @@ if not st.session_state.logged_in:
             st.markdown("<br>", unsafe_allow_html=True) 
             
             with st.form("login"):
+                st.markdown("<h3 style='text-align: center; margin-bottom: 10px;'>Sign In</h3>", unsafe_allow_html=True)
                 user = st.text_input("Username", key="login_username_input", placeholder="Enter your username")
                 pw = st.text_input("Password", type="password", key="login_password_input", placeholder="Enter your password")
                 
                 st.markdown("<br>", unsafe_allow_html=True)
                 if st.form_submit_button("Sign In", type="primary", use_container_width=True): 
-                    auth_data, error_msg = check_login(user, pw)
+                    # Stripping spaces to ensure no accidental whitespace causes a failure
+                    auth_data, error_msg = check_login(user.strip(), pw.strip())
                     if auth_data:
                         st.session_state.logged_in = True
                         st.session_state.company_id = auth_data['company_id']
