@@ -128,6 +128,15 @@ st.markdown(f"""
         border-color: {primary_btn} !important; box-shadow: 0 0 0 1px {primary_btn} !important;
     }}
     
+    /* Elevate Forms (Login & Standard) */
+    div[data-testid="stForm"] {{
+        border-radius: 12px;
+        padding: 2rem;
+        background-color: {card_bg};
+        border: 1px solid {border_color};
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+    }}
+    
     /* Standard Buttons */
     .stButton > button {{ 
         background-color: {button_bg} !important; border: 1px solid {border_color} !important; border-radius: 6px; font-weight: 500; transition: all 0.2s ease; 
@@ -175,19 +184,21 @@ st.markdown(f"""
 
 # --- AUTH FUNCTIONS ---
 def check_login(username, password):
-    if not supabase: return False
+    if not supabase: return False, "Database connection error."
     if username.lower() == "admin" and password == ADMIN_PASSWORD: 
-        return {"company_id": "admin_demo", "role": "admin", "business_type": "B2B"}
+        return {"company_id": "admin_demo", "role": "admin", "business_type": "B2B"}, ""
     try:
-        res = supabase.table("clients").select("*").eq("company_id", username).eq("password", password).execute()
+        # Use ilike for case-insensitive username matching
+        res = supabase.table("clients").select("*").ilike("company_id", username).eq("password", password).execute()
         if res.data:
             data = res.data[0]
             role = data.get('role', 'user')
             btype = data.get('business_type', 'B2B')
-            return {"company_id": data['company_id'], "role": role, "business_type": btype}
+            return {"company_id": data['company_id'], "role": role, "business_type": btype}, ""
+        else:
+            return None, "Invalid credentials OR your RLS policies are blocking access. Ensure you are using the 'service_role' Secret Key in your Streamlit secrets."
     except Exception as e: 
-        print(e)
-    return None
+        return None, f"Database query failed: {e}"
 
 def do_logout():
     st.session_state.logged_in = False
@@ -198,21 +209,24 @@ def do_logout():
 if not st.session_state.logged_in:
     login_holder = st.empty() 
     with login_holder.container():
-        col1, col2, col3 = st.columns([1, 8, 1])
+        st.markdown("<br><br><br>", unsafe_allow_html=True) # Top spacing
+        col1, col2, col3 = st.columns([1, 1.2, 1]) # Narrower center column for a sleek, modern login box
         with col2:
-            # Login Logo
-            c_logo1, c_logo2, c_logo3 = st.columns([1, 1, 1])
+            # Centered Login Logo
+            c_logo1, c_logo2, c_logo3 = st.columns([1, 1.5, 1]) 
             with c_logo2:
                 try: st.image(LOGO_FILENAME, use_container_width=True)
                 except: pass
                 
-            st.markdown(f"<h1 style='text-align: center; margin-top: 10px;'>💼 {APP_NAME} Access</h1>", unsafe_allow_html=True)
+            st.markdown("<br>", unsafe_allow_html=True) 
+            
             with st.form("login"):
-                user = st.text_input("Username", key="login_username_input")
-                pw = st.text_input("Password", type="password", key="login_password_input")
+                user = st.text_input("Username", key="login_username_input", placeholder="Enter your username")
+                pw = st.text_input("Password", type="password", key="login_password_input", placeholder="Enter your password")
                 
-                if st.form_submit_button("Secure Login", type="primary"): 
-                    auth_data = check_login(user, pw)
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.form_submit_button("Sign In", type="primary", use_container_width=True): 
+                    auth_data, error_msg = check_login(user, pw)
                     if auth_data:
                         st.session_state.logged_in = True
                         st.session_state.company_id = auth_data['company_id']
@@ -227,7 +241,7 @@ if not st.session_state.logged_in:
                         
                         login_holder.empty() 
                         st.rerun()
-                    else: st.error("Access Denied")
+                    else: st.error(error_msg)
     st.stop()
 
 # --- TOP BAR / THEME TOGGLE ---
@@ -341,7 +355,16 @@ def get_job_color(severity):
     if "medium" in severity: return "orange" 
     return "green"
 
-# --- DATABASE FETCHERS & SETTINGS ---
+def find_nearest_engineer_text(lat, lon, engineers_list):
+    working_statuses = ["Active", "Driving", "On Site", "In Office", "Home"]
+    active_engs = [e for e in engineers_list if e['status'] in working_statuses]
+    if not active_engs: return "No active engineers found."
+    for e in active_engs: e['temp_dist'] = haversine(lon, lat, e['lon'], e['lat'])
+    active_engs.sort(key=lambda x: x['temp_dist'])
+    nearest = active_engs[0]
+    return f"Nearest Engineer: {nearest['name']} ({nearest['temp_dist']:.1f} miles away)"
+
+# --- DATABASE FETCHERS ---
 def get_company_settings(company_id):
     defaults = {
         "pipeline_stages": ["Pre-Site Checks", "Kit Ordered", "Kit Arrived", "Install Scheduled", "Sign Off"],
@@ -450,17 +473,14 @@ def upload_customer_attachment(company_id, customer_name, uploaded_file):
         file_path = f"{company_id}/{safe_cust_name}/{int(time.time())}_{uploaded_file.name.replace(' ', '_')}"
         file_bytes = uploaded_file.getvalue()
         
-        # Upload to Supabase Storage Bucket
         supabase.storage.from_("attachments").upload(
             file=file_bytes,
             path=file_path,
             file_options={"content-type": uploaded_file.type}
         )
         
-        # Get public URL
         file_url = supabase.storage.from_("attachments").get_public_url(file_path)
         
-        # Save metadata to DB
         supabase.table("customer_attachments").insert({
             "company_id": company_id,
             "customer_name": customer_name,
@@ -469,7 +489,6 @@ def upload_customer_attachment(company_id, customer_name, uploaded_file):
             "created_at": str(datetime.now())
         }).execute()
         
-        # Add to timeline automatically
         add_timeline_entry(company_id, customer_name, "Document Logged", f"Attachment uploaded: {uploaded_file.name}")
         return True
     except Exception as e:
